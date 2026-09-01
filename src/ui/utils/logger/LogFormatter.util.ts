@@ -4,7 +4,7 @@
 //  structured message layout for console output.
 // ─────────────────────────────────────────────
 
-import { LogLevel } from './LogLevel.util.js';
+import { LogLevel } from './LogLevel.util.ts';
 
 // ANSI escape codes — safe to use in Node/Playwright runners
 const ANSI = {

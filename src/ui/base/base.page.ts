@@ -7,11 +7,11 @@
 // ─────────────────────────────────────────────
 
 import { type Page, expect } from '@playwright/test';
-import type { SmartLogger } from '../../utils/logger/SmartLogger.util.ts';
-import { logger } from '../../utils/logger/SmartLogger.util.ts';
-import { ElementActions } from '../../utils/actions/ElementActions.util.ts';
-import { ElementAssertions } from '../../utils/assertions/ElementAssertions.util.ts';
-import { GenericAssertions } from '../../utils/assertions/GenericAssertions.util.ts';
+import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
+import { logger } from '../utils/logger/SmartLogger.util.ts';
+import { ElementActions } from './ElementActions.util.ts';
+import { ElementAssertions } from './ElementAssertions.util.ts';
+import { GenericAssertions } from './GenericAssertions.util.ts';
 import type {
     GotoOptions,
     ReloadOptions,
@@ -25,7 +25,7 @@ import type {
     ToHaveTitleOtpions,
     ToHaveURLOptions,
     ToHaveURLPattern,
-} from '../../../config/page-types.config.ts'
+} from '../config/page-types.config.ts'
 
 export abstract class BasePage {
 

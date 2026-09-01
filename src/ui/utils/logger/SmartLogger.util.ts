@@ -5,8 +5,8 @@
 // ─────────────────────────────────────────────
 
 import { test } from '@playwright/test';
-import { LogLevel, resolveLogLevel } from './LogLevel.util.js';
-import { LogFormatter } from './LogFormatter.util.js';
+import { LogLevel, resolveLogLevel } from './LogLevel.util.ts';
+import { LogFormatter } from './LogFormatter.util.ts';
 
 export class SmartLogger {
   // ─── Singleton ────────────────────────────

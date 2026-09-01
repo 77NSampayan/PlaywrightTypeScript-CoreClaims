@@ -1,6 +1,6 @@
-import { test } from '../fixtures/base.fixture.js';
-import { test_credentials } from '../playwright.config.ts';
-import { uiEndPoints } from '../config/endpoint.config.js';
+import { test } from '../../src/ui/fixtures/base.fixture.ts';
+import { test_credentials } from '../../playwright.config.ts';
+import { uiEndPoints } from '../../src/ui/config/endpoint.config.ts';
 
 test.beforeEach(async ({ page, loginPage, logger }) => {
     await logger.step('NAVIGATE TO LOGIN PAGE', async () => {

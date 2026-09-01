@@ -1,8 +1,8 @@
 import { test as base } from '@playwright/test';
-import { AuthenticationAPI } from '../api/authentication/authentication-api.js';
-import { logger, type SmartLogger } from '../src/utils/logger/SmartLogger.util.js';
-import { LoginPage } from '../src/pages/components/login.page.ts';
-import { SecureAreaPage } from '../src/pages/components/secure-area.page.ts';
+import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
+import { logger, type SmartLogger } from '../utils/logger/SmartLogger.util.ts';
+import { LoginPage } from '../pages/login.page.ts';
+import { SecureAreaPage } from '../pages/secure-area.page.ts';
 // import { apiEndPoints } from '../config/endpoint.config.ts';
 
 

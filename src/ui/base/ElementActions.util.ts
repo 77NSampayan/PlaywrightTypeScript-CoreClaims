@@ -1,5 +1,5 @@
 import type { Locator } from '@playwright/test';
-import type { SmartLogger } from '../logger/SmartLogger.util.ts';
+import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
 import type {
     ClickOptions,
     FillOptions,
@@ -9,7 +9,7 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
-} from '../../../config/locator-types.config.ts';
+} from '../config/locator-types.config.ts';
 
 export class ElementActions {
 

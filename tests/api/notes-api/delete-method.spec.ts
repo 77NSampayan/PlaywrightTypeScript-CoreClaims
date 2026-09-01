@@ -1,4 +1,4 @@
-import { test, apiEndPoints } from '../../../fixtures/base.fixture.js'
+import { test, apiEndPoints } from '../../../src/ui/fixtures/base.fixture.ts'
 import { expect } from '@playwright/test';
 
 test.describe("Validate Logout API", () => {
