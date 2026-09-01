@@ -21,6 +21,7 @@ export class SecureAreaPage extends BasePage {
 
     // ─── Actions ──────────────────────────────
 
+    
 
     // ─── Assertions ───────────────────────────
 

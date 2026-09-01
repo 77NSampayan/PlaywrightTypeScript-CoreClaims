@@ -23,7 +23,7 @@ export class LoginPage extends BasePage {
         await this.elements.fill(this.usernameField, username, 'username field');
         await this.elements.fill(this.passwordField, password, 'password field');
         await this.elements.click(this.submitButton, 'submit button');
-    }
+    };
 
     // ─── Assertions ───────────────────────────
 
@@ -31,5 +31,5 @@ export class LoginPage extends BasePage {
         await this.elementAssert.toBeVisible(this.flashMessage, 'flash message');
         await this.elementAssert.toContainText(this.flashMessage, 'You logged into a secure area!', 'flash message');
         await this.toHaveURL("/secure")
-    }
-}
+    };
+};

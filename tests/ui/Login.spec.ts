@@ -1,8 +1,8 @@
 import { test } from '../../src/ui/fixtures/base.fixture.ts';
 import { test_credentials } from '../../playwright.config.ts';
-import { uiEndPoints } from '../../src/ui/config/endpoint.config.ts';
+import { uiEndPoints } from '../../src/api/config/endpoint.config.ts';
 
-test.beforeEach(async ({ page, loginPage, logger }) => {
+test.beforeEach(async ({ loginPage, logger }) => {
     await logger.step('NAVIGATE TO LOGIN PAGE', async () => {
         await logger.info(`Opening URL: ${process.env.BASE_URL}`);
         await loginPage.navigate(`${uiEndPoints.login}`);
