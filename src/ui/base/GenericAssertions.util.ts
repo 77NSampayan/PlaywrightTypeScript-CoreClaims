@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
-import type { SmartLogger } from '../logger/SmartLogger.util.ts';
-import { LogLevel } from '../logger/LogLevel.util.ts';
+import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
+import { LogLevel } from '../utils/logger/LogLevel.util.ts';
 
 export class GenericAssertions {
 

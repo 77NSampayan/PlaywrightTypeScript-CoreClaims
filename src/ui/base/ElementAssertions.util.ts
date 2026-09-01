@@ -1,5 +1,5 @@
 import { expect, type Locator } from '@playwright/test';
-import type { SmartLogger } from '../logger/SmartLogger.util.ts';
+import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
 import type {
     ToBeVisibleOptions,
     ToBeHiddenOptions,
@@ -7,7 +7,7 @@ import type {
     ToContainTextOptions,
     ToBeEnabledOptions,
     ToBeCheckedOptions,
-} from '../../../config/locator-types.config.ts';
+} from '../config/locator-types.config.ts';
 
 export class ElementAssertions {
 
