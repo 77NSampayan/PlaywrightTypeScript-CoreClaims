@@ -17,73 +17,81 @@ export class ElementActions {
 
     async click(locator: Locator, description: string, options?: ClickOptions): Promise<void> {
         await this.logger.action(
-            `Clicking element: "${description}"`,
+            `Clicking element "${description}"`,
             () => locator.click(options),
-            `Element clicked: "${description}"`,
-            `Failed to click element: "${description}"`,
+            `Clicked element "${description}"`,
+            `Failed to click element "${description}"`,
         );
     }
 
     async fill(locator: Locator, value: string, description: string, options?: FillOptions): Promise<void> {
+        // Simple security mask check for passwords/secrets
+        const isSensitive = /password|secret|token|creditcard/i.test(description);
+        const displayValue = isSensitive ? '********' : value;
+
         await this.logger.action(
-            `Filling: ${description}`,
+            `Filling "${displayValue}" into element "${description}"`,
             () => locator.fill(value, options),
-            `Successfully filled in ${description}`,
-            `Failed to fill in ${description}`,
+            `Successfully filled text into element "${description}"`,
+            `Failed to fill text into element "${description}"`,
         );
     }
 
     async check(locator: Locator, description: string, options?: CheckOptions): Promise<void> {
         await this.logger.action(
-            `Checking: ${description}`,
+            `Checking element "${description}"`,
             () => locator.check(options),
-            `Checked: ${description}`,
-            `Failed to check: ${description}`,
+            `Checked element "${description}"`,
+            `Failed to check element "${description}"`,
         );
     }
 
     async uncheck(locator: Locator, description: string, options?: UncheckOptions): Promise<void> {
         await this.logger.action(
-            `Unchecking: ${description}`,
+            `Unchecking element "${description}"`,
             () => locator.uncheck(options),
-            `Unchecked: ${description}`,
-            `Failed to uncheck: ${description}`,
+            `Unchecked element "${description}"`,
+            `Failed to uncheck element "${description}"`,
         );
     }
 
     async selectOption(locator: Locator, values: SelectOptionValues, description: string, options?: SelectOptionOptions): Promise<void> {
+        // Stringify values array if multi-select to keep the console print clean
+        const serializedValues = Array.isArray(values) ? values.join(', ') : String(values);
+
         await this.logger.action(
-            `Selecting option on: ${description}`,
+            `Selecting option "${serializedValues}" on dropdown "${description}"`,
             () => locator.selectOption(values, options),
-            `Selected option on: ${description}`,
-            `Failed to select option on: ${description}`,
+            `Selected option "${serializedValues}" on dropdown "${description}"`,
+            `Failed to select option on dropdown "${description}"`,
         );
     }
 
     async getText(locator: Locator, description: string, options?: GetTextOptions): Promise<string> {
         return this.logger.action(
-            `Getting text of: ${description}`,
+            `Extracting text value from "${description}"`,
             async () => (await locator.textContent(options)) ?? '',
-            (text) => `Text of "${description}": "${text}"`,
-            `Failed to get text of: ${description}`,
+            // Ensure your SmartLogger natively handles string inputs here or accepts text callbacks
+            `Successfully retrieved text content from "${description}"`,
+            `Failed to extract text from "${description}"`,
         );
     }
 
     async waitForVisible(locator: Locator, description: string, options?: WaitForOptions): Promise<void> {
         await this.logger.action(
-            `Waiting for visible: ${description}`,
+            `Waiting for element "${description}" to be visible`,
             () => locator.waitFor({ ...options, state: 'visible' }),
-            `Now visible: ${description}`,
-            `Element did not become visible: ${description}`,
+            `Element "${description}" is now visible`,
+            `Element "${description}" did not become visible within timeout limit`,
         );
     }
 
     async waitForHidden(locator: Locator, description: string, options?: WaitForOptions): Promise<void> {
         await this.logger.action(
-            `Waiting for hidden: ${description}`,
+            `Waiting for element "${description}" to be hidden`,
             () => locator.waitFor({ ...options, state: 'hidden' }),
-            `Now hidden: ${description}`,
-            `Element did not become hidden: ${description}`,
+            `Element "${description}" is now hidden`,
+            `Element "${description}" did not hide within timeout limit`,
         );
     }
 }

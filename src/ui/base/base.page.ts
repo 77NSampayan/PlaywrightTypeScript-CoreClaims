@@ -48,10 +48,6 @@ export abstract class BasePage {
         this.assert = new GenericAssertions(logger);
     }
 
-    protected async step<T>(stepName: string, fn: () => Promise<T>): Promise<T> {
-        return this.logger.step(stepName, fn);
-    }
-
     // ─── Browser Interaction ─────────────────────────
 
     async navigate(url: string, options?: GotoOptions): Promise<void> {

@@ -87,4 +87,4 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 });
 
 export { expect } from '@playwright/test'
-export { apiEndPoints } from '../config/endpoint.config.ts'
+export { apiEndPoints } from '../../api/config/endpoint.config.ts'

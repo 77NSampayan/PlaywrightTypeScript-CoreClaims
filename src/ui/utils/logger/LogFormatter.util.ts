@@ -110,7 +110,8 @@ export class LogFormatter {
    */
   static formatActionEnd(status: 'PASSED' | 'FAILED', message: string): string {
     const statusColor = status === 'FAILED' ? ANSI.error : undefined;
-    return `${tag('END', ANSI.end)} ${tag(status, statusColor)} ${this.colorize(message)}`;
+    // return `${tag('END', ANSI.end)} ${tag(status, statusColor)} ${this.colorize(message)}`;
+    return `${tag('END', ANSI.end)} ${this.colorize(message)}`;
   }
 
   // ─── Helpers ──────────────────────────────

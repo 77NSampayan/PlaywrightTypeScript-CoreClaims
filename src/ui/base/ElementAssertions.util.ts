@@ -15,7 +15,7 @@ export class ElementAssertions {
 
     async toBeVisible(locator: Locator, description: string, options?: ToBeVisibleOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" visibility`,
+            `Asserting element "${description}" is VISIBLE`,
             () => expect(locator).toBeVisible(options),
             `Element "${description}" is visible!`,
             `Element "${description}" is not visible!`,
@@ -24,8 +24,8 @@ export class ElementAssertions {
 
     async toBeHidden(locator: Locator, description: string, options?: ToBeHiddenOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" is hidden`,
-            () => expect(locator).toBeHidden(options),
+            `Asserting element "${description}" is HIDDEN`,
+            () => expect(locator).toBeHidden(options),  
             `Element "${description}" is hidden!`,
             `Element "${description}" is still visible!`,
         );
@@ -33,7 +33,7 @@ export class ElementAssertions {
 
     async toHaveText(locator: Locator, expected: string | RegExp, description: string, options?: ToHaveTextOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" toHaveText: "${expected}"`,
+            `Asserting element "${description}" exactly MATCHES TEXT: "${expected}"`,
             () => expect(locator).toHaveText(expected, options),
             `Element "${description}" contains "${expected}"`,
             `Element "${description}" does not contain "${expected}"`,
@@ -42,7 +42,7 @@ export class ElementAssertions {
 
     async toContainText(locator: Locator, expected: string | RegExp, description: string, options?: ToContainTextOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" toContainText: "${expected}"`,
+            `Asserting element "${description}" CONTAINS TEXT fragment: "${expected}"`,
             () => expect(locator).toContainText(expected, options),
             `Element "${description}" contains "${expected}"`,
             `Element "${description}" does not contain "${expected}"`,
@@ -51,7 +51,7 @@ export class ElementAssertions {
 
     async toBeEnabled(locator: Locator, description: string, options?: ToBeEnabledOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" is enabled`,
+            `Asserting element "${description}" is ENABLED`,
             () => expect(locator).toBeEnabled(options),
             `Element "${description}" is enabled!`,
             `Element "${description}" is disabled!`,
@@ -60,7 +60,7 @@ export class ElementAssertions {
 
     async toBeChecked(locator: Locator, description: string, options?: ToBeCheckedOptions): Promise<void> {
         await this.logger.action(
-            `Asserting element "${description}" is checked`,
+            `Asserting element "${description}" is CHECKED`,
             () => expect(locator).toBeChecked(options),
             `Element "${description}" is checked!`,
             `Element "${description}" is not checked!`,
