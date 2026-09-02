@@ -76,51 +76,42 @@ export abstract class BasePage {
     }
 
     async reload(options?: ReloadOptions): Promise<void> {
-        await this.step('Reload page', async () => {
-            await this.logger.action(
-                'Reloading page',
-                async () => {
-                    await this.page.reload(options);
-                    await this.page.waitForLoadState('domcontentloaded');
-                },
-                () => `Page reloaded. Current URL: ${this.page.url()}`,
-                'Failed to reload page',
-            );
-        });
+        await this.logger.action(
+            'Reloading page',
+            async () => {
+                await this.page.reload(options);
+                await this.page.waitForLoadState('domcontentloaded');
+            },
+            () => `Page reloaded. Current URL: ${this.page.url()}`,
+            'Failed to reload page',
+        );
     }
 
     async goBack(options?: GoBackOptions): Promise<void> {
-        await this.step('Navigate back', async () => {
-            await this.logger.action(
-                'Navigating back',
-                () => this.page.goBack(options),
-                (response) => `Navigated back${response ? '' : ' (no previous history entry)'}. Current URL: ${this.page.url()}`,
-                'Failed to navigate back',
-            );
-        });
+        await this.logger.action(
+            'Navigating back',
+            () => this.page.goBack(options),
+            (response) => `Navigated back${response ? '' : ' (no previous history entry)'}. Current URL: ${this.page.url()}`,
+            'Failed to navigate back',
+        );
     }
 
     async goForward(options?: GoForwardOptions): Promise<void> {
-        await this.step('Navigate forward', async () => {
-            await this.logger.action(
-                'Navigating forward',
-                () => this.page.goForward(options),
-                (response) => `Navigated forward${response ? '' : ' (no forward history entry)'}. Current URL: ${this.page.url()}`,
-                'Failed to navigate forward',
-            );
-        });
+        await this.logger.action(
+            'Navigating forward',
+            () => this.page.goForward(options),
+            (response) => `Navigated forward${response ? '' : ' (no forward history entry)'}. Current URL: ${this.page.url()}`,
+            'Failed to navigate forward',
+        );
     }
 
     async close(options?: PageCloseOptions): Promise<void> {
-        await this.step('Close page', async () => {
-            const url = this.page.url();
-            await this.logger.action(
-                'Closing page',
-                () => this.page.close(options),
-                `Page closed. Last URL: ${url}`,
-                'Failed to close page',
-            );
-        });
+        await this.logger.action(
+            'Closing page',
+            () => this.page.close(options),
+            () => `Page closed. Last URL: ${this.page.url()}`,
+            'Failed to close page',
+        );
     }
 
     // ─── Waits ────────────────────────────────
