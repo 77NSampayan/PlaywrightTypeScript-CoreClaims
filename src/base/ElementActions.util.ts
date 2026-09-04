@@ -1,5 +1,5 @@
 import type { Locator } from '@playwright/test';
-import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
+import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import type {
     ClickOptions,
     FillOptions,
@@ -9,7 +9,7 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
-} from '../config/locator-types.config.ts';
+} from '@constants/locator-types.config.ts';
 
 export class ElementActions {
 
@@ -20,7 +20,7 @@ export class ElementActions {
             `Clicking element "${description}"`,
             () => locator.click(options),
             `Clicked element "${description}"`,
-            `Failed to click element "${description}"`,
+            `Failed to click element "${description}"`
         );
     }
 
@@ -33,7 +33,7 @@ export class ElementActions {
             `Filling "${displayValue}" into element "${description}"`,
             () => locator.fill(value, options),
             `Successfully filled text into element "${description}"`,
-            `Failed to fill text into element "${description}"`,
+            `Failed to fill text into element "${description}"`
         );
     }
 
@@ -42,7 +42,7 @@ export class ElementActions {
             `Checking element "${description}"`,
             () => locator.check(options),
             `Checked element "${description}"`,
-            `Failed to check element "${description}"`,
+            `Failed to check element "${description}"`
         );
     }
 
@@ -51,7 +51,7 @@ export class ElementActions {
             `Unchecking element "${description}"`,
             () => locator.uncheck(options),
             `Unchecked element "${description}"`,
-            `Failed to uncheck element "${description}"`,
+            `Failed to uncheck element "${description}"`
         );
     }
 
@@ -63,7 +63,7 @@ export class ElementActions {
             `Selecting option "${serializedValues}" on dropdown "${description}"`,
             () => locator.selectOption(values, options),
             `Selected option "${serializedValues}" on dropdown "${description}"`,
-            `Failed to select option on dropdown "${description}"`,
+            `Failed to select option on dropdown "${description}"`
         );
     }
 
@@ -73,7 +73,7 @@ export class ElementActions {
             async () => (await locator.textContent(options)) ?? '',
             // Ensure your SmartLogger natively handles string inputs here or accepts text callbacks
             `Successfully retrieved text content from "${description}"`,
-            `Failed to extract text from "${description}"`,
+            `Failed to extract text from "${description}"`
         );
     }
 
@@ -82,7 +82,7 @@ export class ElementActions {
             `Waiting for element "${description}" to be visible`,
             () => locator.waitFor({ ...options, state: 'visible' }),
             `Element "${description}" is now visible`,
-            `Element "${description}" did not become visible within timeout limit`,
+            `Element "${description}" did not become visible within timeout limit`
         );
     }
 
@@ -91,7 +91,7 @@ export class ElementActions {
             `Waiting for element "${description}" to be hidden`,
             () => locator.waitFor({ ...options, state: 'hidden' }),
             `Element "${description}" is now hidden`,
-            `Element "${description}" did not hide within timeout limit`,
+            `Element "${description}" did not hide within timeout limit`
         );
     }
 }

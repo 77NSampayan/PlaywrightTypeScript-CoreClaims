@@ -24,6 +24,17 @@
 
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths":{
+      "@root/*":["./*"],
+      "@base/*": ["src/base/*"],
+      "@components/*": ["src/components/*"],
+      "@constants/*": ["src/constants/*"],
+      "@fixtures/*": ["src/fixtures/*"],
+      "@pages/*": ["src/pages/*"],
+      "@utils/*": ["src/utils/*"]
+    },
 
     // Style Options
     // "noImplicitReturns": true,

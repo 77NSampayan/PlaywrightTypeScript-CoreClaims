@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
-import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
-import { LogLevel } from '../utils/logger/LogLevel.util.ts';
+import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
+import { LogLevel } from '@utils/logger/LogLevel.util.ts';
 
 export class GenericAssertions {
 
@@ -12,7 +12,7 @@ export class GenericAssertions {
             () => expect(actual as unknown).toEqual(expected),
             `Confirmed equal: ${description}`,
             `Not equal: ${description}`,
-            LogLevel.DEBUG,
+            LogLevel.DEBUG
         );
     }
 
@@ -22,7 +22,7 @@ export class GenericAssertions {
             () => expect(collection as unknown).toContain(item),
             `Confirmed contains: ${description}`,
             `Does not contain: ${description}`,
-            LogLevel.DEBUG,
+            LogLevel.DEBUG
         );
     }
 
@@ -32,7 +32,7 @@ export class GenericAssertions {
             () => expect(value).toBeTruthy(),
             `Confirmed truthy: ${description}`,
             `Not truthy: ${description}`,
-            LogLevel.DEBUG,
+            LogLevel.DEBUG
         );
     }
 
@@ -42,7 +42,7 @@ export class GenericAssertions {
             () => expect(actual).toBeGreaterThan(expected),
             `Confirmed greater than: ${description}`,
             `Not greater than: ${description}`,
-            LogLevel.DEBUG,
+            LogLevel.DEBUG
         );
     }
 }

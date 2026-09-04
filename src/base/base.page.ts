@@ -7,8 +7,8 @@
 // ─────────────────────────────────────────────
 
 import { type Page, expect } from '@playwright/test';
-import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
-import { logger } from '../utils/logger/SmartLogger.util.ts';
+import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
+import { logger } from '@utils/logger/SmartLogger.util.ts';
 import { ElementActions } from './ElementActions.util.ts';
 import { ElementAssertions } from './ElementAssertions.util.ts';
 import { GenericAssertions } from './GenericAssertions.util.ts';
@@ -22,10 +22,11 @@ import type {
     WaitForURLPattern,
     WaitForURLOptions,
     PageCloseOptions,
-    ToHaveTitleOtpions,
+    ToHaveTitleOptions,
     ToHaveURLOptions,
     ToHaveURLPattern,
-} from '../config/page-types.config.ts'
+} from '@constants/page-types.config.ts'
+import { uiEndPoints } from '@constants/endpoint.config.ts';
 
 export abstract class BasePage {
 
@@ -48,17 +49,20 @@ export abstract class BasePage {
         this.assert = new GenericAssertions(logger);
     }
 
+    // protected async step<T>(stepName: string, fn: () => Promise<T>): Promise<T> {
+    //     return this.logger.step(stepName, fn);
+    // }
+
     // ─── Browser Interaction ─────────────────────────
 
-    async navigate(url: string, options?: GotoOptions): Promise<void> {
+    async navigate(url: string = uiEndPoints.login, options?: GotoOptions): Promise<void> {
         await this.logger.action(
-            `Navigating to ${url}`,
-            async () => {
+            `Navigating to ${url}`, async () => {
                 await this.page.goto(url, options);
                 await this.page.waitForLoadState('domcontentloaded');
             },
             () => `Page loaded. Current URL: ${this.page.url()}`,
-            `Failed to load ${url}`,
+            `Failed to load ${url}`
         );
     };
 
@@ -67,7 +71,7 @@ export abstract class BasePage {
             'Getting page title',
             () => this.page.title(),
             (title) => `Page title: ${title}`,
-            'Failed to get page title',
+            'Failed to get page title'
         );
     }
 
@@ -79,7 +83,7 @@ export abstract class BasePage {
                 await this.page.waitForLoadState('domcontentloaded');
             },
             () => `Page reloaded. Current URL: ${this.page.url()}`,
-            'Failed to reload page',
+            'Failed to reload page'
         );
     }
 
@@ -88,7 +92,7 @@ export abstract class BasePage {
             'Navigating back',
             () => this.page.goBack(options),
             (response) => `Navigated back${response ? '' : ' (no previous history entry)'}. Current URL: ${this.page.url()}`,
-            'Failed to navigate back',
+            'Failed to navigate back'
         );
     }
 
@@ -97,7 +101,7 @@ export abstract class BasePage {
             'Navigating forward',
             () => this.page.goForward(options),
             (response) => `Navigated forward${response ? '' : ' (no forward history entry)'}. Current URL: ${this.page.url()}`,
-            'Failed to navigate forward',
+            'Failed to navigate forward'
         );
     }
 
@@ -106,7 +110,7 @@ export abstract class BasePage {
             'Closing page',
             () => this.page.close(options),
             () => `Page closed. Last URL: ${this.page.url()}`,
-            'Failed to close page',
+            'Failed to close page'
         );
     }
 
@@ -117,7 +121,7 @@ export abstract class BasePage {
             `Waiting for load state: ${state ?? 'load'}`,
             () => this.page.waitForLoadState(state, options),
             `Load state reached: ${state ?? 'load'}`,
-            `Load state not reached: ${state ?? 'load'}`,
+            `Load state not reached: ${state ?? 'load'}`
         );
     }
 
@@ -126,7 +130,7 @@ export abstract class BasePage {
             `Waiting for URL: ${url}`,
             () => this.page.waitForURL(url, options),
             () => `URL matched. Current URL: ${this.page.url()}`,
-            `URL did not match: ${url}`,
+            `URL did not match: ${url}`
         );
     }
 
@@ -137,16 +141,16 @@ export abstract class BasePage {
             `Asserting URL: ${url}`,
             () => expect(this.page).toHaveURL(url, options),
             () => `Confirmed URL: ${this.page.url()}`,
-            `URL did not match: ${url}`,
+            `URL did not match: ${url}`
         );
     }
 
-    async toHaveTitle(title: string | RegExp, options?: ToHaveTitleOtpions): Promise<void> {
+    async toHaveTitle(title: string | RegExp, options?: ToHaveTitleOptions): Promise<void> {
         await this.logger.action(
             `Asserting title: ${title}`,
             () => expect(this.page).toHaveTitle(title, options),
-            `Confirmed title: ${title}`,
-            `Title did not match: ${title}`,
+            () => `Confirmed title: ${title}`,
+            `Title did not match: ${title}`
         );
     }
 

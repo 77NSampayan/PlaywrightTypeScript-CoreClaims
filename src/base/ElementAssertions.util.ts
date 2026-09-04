@@ -1,5 +1,5 @@
 import { expect, type Locator } from '@playwright/test';
-import type { SmartLogger } from '../utils/logger/SmartLogger.util.ts';
+import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import type {
     ToBeVisibleOptions,
     ToBeHiddenOptions,
@@ -7,7 +7,7 @@ import type {
     ToContainTextOptions,
     ToBeEnabledOptions,
     ToBeCheckedOptions,
-} from '../config/locator-types.config.ts';
+} from '@constants/locator-types.config.ts';
 
 export class ElementAssertions {
 
@@ -27,7 +27,7 @@ export class ElementAssertions {
             `Asserting element "${description}" is HIDDEN`,
             () => expect(locator).toBeHidden(options),  
             `Element "${description}" is hidden!`,
-            `Element "${description}" is still visible!`,
+            `Element "${description}" is still visible!`
         );
     }
 
@@ -36,7 +36,7 @@ export class ElementAssertions {
             `Asserting element "${description}" exactly MATCHES TEXT: "${expected}"`,
             () => expect(locator).toHaveText(expected, options),
             `Element "${description}" contains "${expected}"`,
-            `Element "${description}" does not contain "${expected}"`,
+            `Element "${description}" does not contain "${expected}"`
         );
     }
 
@@ -45,7 +45,7 @@ export class ElementAssertions {
             `Asserting element "${description}" CONTAINS TEXT fragment: "${expected}"`,
             () => expect(locator).toContainText(expected, options),
             `Element "${description}" contains "${expected}"`,
-            `Element "${description}" does not contain "${expected}"`,
+            `Element "${description}" does not contain "${expected}"`
         );
     }
 
@@ -54,7 +54,7 @@ export class ElementAssertions {
             `Asserting element "${description}" is ENABLED`,
             () => expect(locator).toBeEnabled(options),
             `Element "${description}" is enabled!`,
-            `Element "${description}" is disabled!`,
+            `Element "${description}" is disabled!`
         );
     }
 
@@ -63,7 +63,7 @@ export class ElementAssertions {
             `Asserting element "${description}" is CHECKED`,
             () => expect(locator).toBeChecked(options),
             `Element "${description}" is checked!`,
-            `Element "${description}" is not checked!`,
+            `Element "${description}" is not checked!`
         );
     }
 }

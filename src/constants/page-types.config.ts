@@ -59,4 +59,4 @@ export type PageCloseOptions = Parameters<Page['close']>[0];
 // `expected` value before their options.
 export type ToHaveURLPattern = Parameters<LocatorMatchers['toHaveURL']>[0];
 export type ToHaveURLOptions = Parameters<LocatorMatchers['toHaveURL']>[1];
-export type ToHaveTitleOtpions = Parameters<LocatorMatchers['toHaveTitle']>[1];
+export type ToHaveTitleOptions = Parameters<LocatorMatchers['toHaveTitle']>[1];

@@ -1,13 +1,13 @@
 import { test as base } from '@playwright/test';
-import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
-import { logger, type SmartLogger } from '../utils/logger/SmartLogger.util.ts';
-import { LoginPage } from '../pages/login.page.ts';
-import { SecureAreaPage } from '../pages/secure-area.page.ts';
+// import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
+import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
+import { LoginPage } from '@pages/login.page.ts';
+import { SecureAreaPage } from '@pages/secure-area.page.ts';
 // import { apiEndPoints } from '../config/endpoint.config.ts';
 
 
 export type TestFixtures = {
-    authentication: AuthenticationAPI;
+    // authentication: AuthenticationAPI;
     logger: SmartLogger;
     loginPage: LoginPage;
     secureAreaPage: SecureAreaPage
@@ -58,11 +58,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
  
     }, { scope: 'worker', auto: true }],   // auto: true = no need to declare in tests
 
-    // ── Test-scoped: logger context reset per test ───────────────
-    authentication: async ({}, use) => {
-        const authentication = await new AuthenticationAPI();
-        await use(authentication);
-    },
+    // // ── Test-scoped: logger context reset per test ───────────────
+    // authentication: async ({}, use) => {
+    //     const authentication = await new AuthenticationAPI();
+    //     await use(authentication);
+    // },
 
     // ── Test-scoped: API client ───────────────────────────────────
     logger: async ({}, use, testInfo) => {
@@ -87,4 +87,4 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 });
 
 export { expect } from '@playwright/test'
-export { apiEndPoints } from '../../api/config/endpoint.config.ts'
+export { apiEndPoints } from '../constants/endpoint.config.ts'
