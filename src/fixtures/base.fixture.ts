@@ -2,7 +2,7 @@ import { test as base } from '@playwright/test';
 // import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
 import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
-import { SecureAreaPage } from '@pages/secure-area.page.ts';
+import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
 // import { apiEndPoints } from '../config/endpoint.config.ts';
 
 
@@ -10,7 +10,7 @@ export type TestFixtures = {
     // authentication: AuthenticationAPI;
     logger: SmartLogger;
     loginPage: LoginPage;
-    secureAreaPage: SecureAreaPage
+    microsoftLoginPage: MicrosoftLoginPage;
 };
 
 export type WorkerFixtures = {
@@ -81,8 +81,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         await use(new LoginPage(page));
     },
 
-    secureAreaPage: async ({ page }, use) => {
-        await use(new SecureAreaPage(page));
+    microsoftLoginPage: async ({ page }, use) => {
+        await use(new MicrosoftLoginPage(page));
     }
 });
 

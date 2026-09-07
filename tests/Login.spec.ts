@@ -8,22 +8,25 @@ test.beforeEach(async ({ loginPage, logger }) => {
     });
 });
 
-test.describe('SmartLogger Demo - Login Page', () => {
-    test('Successful login with valid credentials', async ({ loginPage, secureAreaPage, logger }) => {
-        await logger.step(`LOGIN_TEST_USER_(${test_credentials.valid_username_1})`, async () => {
-            await loginPage.toHaveTitle('Test Login Page for Automation Testing Practice');
-            await loginPage.login(
+test.describe('Amplify Health Product Portal - Login', () => {
+    test('Successful login via Microsoft SSO with valid credentials', async ({ loginPage, microsoftLoginPage, logger }) => {
+        await logger.step('VERIFY_LOGIN_PAGE', async () => {
+            await loginPage.expectLoginPageVisible();
+        });
+
+        await logger.step(`ENTER_PORTAL_EMAIL_(${test_credentials.valid_username_1})`, async () => {
+            await loginPage.login(test_credentials.valid_username_1);
+        });
+
+        await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => {
+            await microsoftLoginPage.login(
                 test_credentials.valid_username_1,
                 test_credentials.valid_password_1
             );
         });
 
-        await logger.step('VERIFY_LOGIN_SUCCESS', async () => {
-            await loginPage.expectLoginSuccess();
-        });
-
-        await logger.step('VERIFY_LANDING_PAGE', async () => {
-            await secureAreaPage.verifySecureAreaPage(test_credentials.valid_username_1);
+        await logger.step('VERIFY_REDIRECT_TO_PORTAL', async () => {
+            await microsoftLoginPage.expectRedirectedBackToApp();
         });
     });
 
