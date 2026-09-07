@@ -103,10 +103,10 @@ export class SmartLogger {
   /**
    * Wraps a single Playwright action or assertion with START/END logging.
    * Logs `[START] <startMessage>`, runs `fn`, then logs
-   * `[END] [PASSED] <passMessage>` on success or `[END] [FAILED] <failMessage>`
-   * on failure (the FAILED tag is red, always at ERROR level so it isn't
-   * hidden by LOG_LEVEL) — then rethrows so the caller/Playwright still sees
-   * the original error.
+   * `[END] <passMessage>` on success or `[END] <failMessage>` on failure.
+   * The failure line is always emitted at ERROR level — red, and never hidden
+   * by LOG_LEVEL — which is what distinguishes it from the success line. Then
+   * rethrows, so the caller/Playwright still sees the original error.
    *
    * `passMessage` may be a function of the result, for messages that depend
    * on state only known after `fn` runs (e.g. the page URL after a navigation).
@@ -131,10 +131,10 @@ export class SmartLogger {
       try {
         const result = await fn();
         const pass = typeof passMessage === 'function' ? passMessage(result) : passMessage;
-        this.emit(level, LogFormatter.formatActionEnd('PASSED', pass));
+        this.emit(level, LogFormatter.formatActionEnd(pass));
         return result;
       } catch (err) {
-        this.emit(LogLevel.ERROR, LogFormatter.formatActionEnd('FAILED', failMessage));
+        this.emit(LogLevel.ERROR, LogFormatter.formatActionEnd(failMessage));
         throw err;
       }
     });

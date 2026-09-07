@@ -30,7 +30,15 @@ That means:
 
 **`locator-types.config.ts`** — types for `Locator`-level methods, consumed by `ElementActions` and `ElementAssertions`:
 
-`ClickOptions`, `FillOptions`, `CheckOptions`, `UncheckOptions`, `SelectOptionValues`, `SelectOptionOptions`, `WaitForOptions`, `GetTextOptions`, `ToBeVisibleOptions`, `ToBeHiddenOptions`, `ToBeEnabledOptions`, `ToBeCheckedOptions`, `ToHaveTextOptions`, `ToContainTextOptions`
+`ClickOptions`, `FillOptions`, `FillActionOptions`, `CheckOptions`, `UncheckOptions`, `SelectOptionValues`, `SelectOptionOptions`, `WaitForOptions`, `GetTextOptions`, `ToBeVisibleOptions`, `ToBeHiddenOptions`, `ToBeEnabledOptions`, `ToBeCheckedOptions`, `ToHaveTextOptions`, `ToContainTextOptions`
+
+### The one deliberate extension
+
+`FillActionOptions` is `NonNullable<FillOptions> & { mask?: boolean }` — Playwright's real fill options plus one framework flag that forces the logged value to be masked.
+
+This is the sanctioned exception to "never hand-write an option shape", and the boundary is worth stating: **the Playwright half stays derived, and only a genuinely framework-owned concern is added on top.** `mask` qualifies because Playwright has no opinion about what we log. Anything Playwright *does* accept must still come from `Parameters<...>`, so a version bump keeps updating it for you.
+
+If you extend another wrapper this way, intersect with `NonNullable<...>` as above — a bare `FillOptions` includes `undefined`, and intersecting that with an object type collapses in ways that are easy to misread.
 
 ### How to add a new wrapped method
 
@@ -69,4 +77,6 @@ For a matcher without an `expected` argument (like `toBeVisible`), the options t
 
 ## `endpoint.config.ts`
 
-Single source of truth for API (`apiEndPoints`) and UI (`uiEndPoints`) paths. Not part of the type-derivation pattern above — see the main [project README](../../README.md) and [`../fixtures/README.md`](../fixtures/README.md) for how it's consumed. Add new routes here rather than hardcoding paths in a page object or test.
+Single source of truth for UI route paths (`uiEndPoints`). Not part of the type-derivation pattern above — see the main [project README](../../README.md) and [`../fixtures/README.md`](../fixtures/README.md) for how it's consumed. Add new routes here rather than hardcoding paths in a page object or test.
+
+`BasePage.navigate()` defaults to `uiEndPoints.login`, so any new route added here is immediately usable as a `navigate()` argument.

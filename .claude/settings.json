@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit)",
+      "Bash(git status:*)",
+      "Bash(git diff --name-only:*)",
+      "Bash(git diff --stat:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git log --oneline:*)",
+      "Bash(git check-ignore:*)"
+    ],
+    "deny": [
+      "Bash(npx playwright test:*)",
+      "Bash(playwright test:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./.claude/settings.local.json)"
+    ]
+  }
+}

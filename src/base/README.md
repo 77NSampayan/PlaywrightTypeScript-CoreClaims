@@ -53,7 +53,7 @@ export class MyPage extends BasePage {
 Wraps `Locator` interaction methods, each logged via `logger.action(...)`:
 
 - `click(locator, description, options?)`
-- `fill(locator, value, description, options?)` — auto-masks the logged value (`********`) when `description` matches `/password|secret|token|creditcard/i`; name sensitive fields accordingly so they get masked automatically
+- `fill(locator, value, description, options?)` — pass `{ mask: true }` in `options` for any sensitive **or identifying** field and the logged value becomes `********`. Masking covers the `test.step()` name too, so it keeps the value out of the HTML report and trace, not just the console. A `/password|secret|token|creditcard/i` description sniff remains as a backstop only: masking is a call-site decision because no honest name for an identity field (`'email field'`, `'member number'`) matches a keyword list
 - `check(locator, description, options?)` / `uncheck(locator, description, options?)`
 - `selectOption(locator, values, description, options?)`
 - `getText(locator, description, options?)` — returns the element's text content

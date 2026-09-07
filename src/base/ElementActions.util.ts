@@ -2,7 +2,7 @@ import type { Locator } from '@playwright/test';
 import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import type {
     ClickOptions,
-    FillOptions,
+    FillActionOptions,
     CheckOptions,
     UncheckOptions,
     SelectOptionValues,
@@ -24,14 +24,22 @@ export class ElementActions {
         );
     }
 
-    async fill(locator: Locator, value: string, description: string, options?: FillOptions): Promise<void> {
-        // Simple security mask check for passwords/secrets
-        const isSensitive = /password|secret|token|creditcard/i.test(description);
+    async fill(locator: Locator, value: string, description: string, options?: FillActionOptions): Promise<void> {
+        const { mask, ...fillOptions } = options ?? {};
+
+        // `mask: true` is the reliable path. The keyword sniff below is only a
+        // backstop for the obvious cases — it is not a guarantee, because no
+        // natural name for an identity field contains any of these words.
+        //
+        // Masking matters more than it looks: this start message becomes the
+        // `test.step()` name (SmartLogger.action → runStep), so an unmasked
+        // value is published to the console, the HTML report AND the trace.
+        const isSensitive = mask ?? /password|secret|token|creditcard/i.test(description);
         const displayValue = isSensitive ? '********' : value;
 
         await this.logger.action(
             `Filling "${displayValue}" into element "${description}"`,
-            () => locator.fill(value, options),
+            () => locator.fill(value, fillOptions),
             `Successfully filled text into element "${description}"`,
             `Failed to fill text into element "${description}"`
         );

@@ -33,7 +33,7 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
 
    `BASE_URL`, `VALID_USERNAME_1`, and `VALID_PASSWORD_1` are required — the config throws on startup if any are missing. `LOG_LEVEL` is optional (`DEBUG` | `INFO` | `STEP` | `WARN` | `ERROR`, defaults to `INFO`).
 
-   `.env` is gitignored — never commit real credentials.
+   `.env` is listed in [.gitignore](.gitignore) and must never be committed — it holds real credentials for a live portal account. If you ever find it tracked (`git ls-files .env` returns a result), untrack it with `git rm --cached .env` and rotate the account password, since the value is preserved in git history.
 
 ## Running tests
 

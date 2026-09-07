@@ -20,7 +20,7 @@ import { test, expect } from '@fixtures/base.fixture.ts';
 ### Also re-exported from here
 
 - `expect` (re-exported from `@playwright/test`)
-- `apiEndPoints` (re-exported from [`@constants/endpoint.config.ts`](../constants/endpoint.config.ts))
+- `uiEndPoints` (re-exported from [`@constants/endpoint.config.ts`](../constants/endpoint.config.ts))
 
 ### Usage in a spec
 
