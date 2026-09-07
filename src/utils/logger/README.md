@@ -64,7 +64,7 @@ LOG_LEVEL=DEBUG   # verbose — shows all messages
 LOG_LEVEL=WARN    # quiet — only warnings and errors
 ```
 
-Messages below the active level are dropped in `SmartLogger.emit()` before formatting — but the failure-buffer dump in `endTest(false)` always prints regardless of the active level.
+Messages below the active level are not printed to the console — but they *are* still formatted and written to the circular buffer, so the failure dump in `endTest(false)` genuinely replays them regardless of the active level. The level governs what is **displayed**, never what is **retained**: a run at `LOG_LEVEL=WARN` still gives you full `DEBUG`-level context on a failure.
 
 ### `LogFormatter.util.ts` — `LogFormatter`
 

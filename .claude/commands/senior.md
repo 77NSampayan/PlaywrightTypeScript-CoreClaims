@@ -1,6 +1,6 @@
 ---
-description: Senior QA review — conventions or coverage gaps (read-only)
-argument-hint: "[coverage] [path]  ·  bare = review uncommitted changes"
+description: Senior QA review — conventions, coverage gaps, or both (read-only)
+argument-hint: "[coverage|both] [path]  ·  bare = review uncommitted changes"
 allowed-tools: Bash(git status:*), Bash(git diff --name-only:*), Bash(git diff --stat:*), Task
 model: inherit
 ---
@@ -32,6 +32,10 @@ Build the agent's request using these rules:
   `Mode REVIEW. Working tree is clean — perform a standing audit of tests/ and src/pages/.`
 - `$ARGUMENTS` starts with `coverage` → `Mode COVERAGE.` plus any remaining
   words as scope.
+- `$ARGUMENTS` starts with `both`, or asks for a review *and* coverage in the
+  same breath → `Mode HYBRID.` plus any remaining words as scope. Say
+  explicitly that both an implementation review and a coverage analysis are
+  wanted, since HYBRID is only entered on an explicit request.
 - otherwise → `Mode REVIEW. Target: <paths exactly as given>.`
 
 Pass the file lists above through verbatim so the agent doesn't need git itself.

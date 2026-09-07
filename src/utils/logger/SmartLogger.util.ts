@@ -162,8 +162,8 @@ export class SmartLogger {
 
   /**
    * Central emit — all log methods funnel through here.
-   * Skips output if the message level is below the active threshold.
-   * Stores every emitted line in the circular buffer.
+   * Buffers every line, then skips console output if the message level is
+   * below the active threshold.
    *
    * Future integration points:
    *   → Add Allure attachment call here
@@ -171,12 +171,18 @@ export class SmartLogger {
    *   → Add file-write call here
    */
   private emit(level: LogLevel, message: string): void {
-    if (level < this.activeLevel) return;
-
     const formatted = LogFormatter.format({ level, message });
 
-    console.log(formatted);
+    // Buffer BEFORE the level gate, not after. endTest(false) is documented to
+    // replay the last BUFFER_SIZE lines regardless of LOG_LEVEL, and that only
+    // holds if below-threshold lines were captured in the first place.
+    // "Quiet mode" and "forensics mode" are different concerns: the level
+    // governs what is *displayed*, never what is *retained*.
     this.bufferLine(formatted);
+
+    if (level < this.activeLevel) return;
+
+    console.log(formatted);
   }
 
   /**
