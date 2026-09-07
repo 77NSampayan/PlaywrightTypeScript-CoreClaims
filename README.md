@@ -50,6 +50,51 @@ npx playwright codegen <url>                 # record a new flow/locators
 
 Browsers run **headed** and maximized by default (see [playwright.config.ts](playwright.config.ts)).
 
+## Writing test specs
+
+Specs are plain Playwright Test scripts — `test.describe` / `test` / `test.beforeEach` — not Cucumber/Gherkin `.feature` files. There's no separate BDD framework here, but the tests are still capable of reading like BDD scenarios: `logger.step(...)` gives each Given/When/Then-style beat of the flow a named block, both in the console and as a collapsible node in the HTML report/trace viewer.
+
+Example, based on [`tests/Login.spec.ts`](tests/Login.spec.ts) and [`src/pages/login.page.ts`](src/pages/login.page.ts):
+
+```ts
+import { test } from '@fixtures/base.fixture.ts';
+import { test_credentials } from '@root/playwright.config.ts';
+
+test.beforeEach(async ({ loginPage }) => {
+    await loginPage.navigate();
+});
+
+test.describe('Amplify Health Product Portal - Login', () => {
+    test('Successful login via Microsoft SSO with valid credentials', async ({ loginPage, microsoftLoginPage, logger }) => {
+        await logger.step('VERIFY_LOGIN_PAGE', async () => {          // Given
+            await loginPage.expectLoginPageVisible();
+        });
+
+        await logger.step('ENTER_PORTAL_EMAIL', async () => {         // When
+            await loginPage.login(test_credentials.valid_username_1);
+        });
+
+        await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => { // When
+            await microsoftLoginPage.login(
+                test_credentials.valid_username_1,
+                test_credentials.valid_password_1
+            );
+        });
+
+        await logger.step('VERIFY_REDIRECT_TO_PORTAL', async () => {  // Then
+            await microsoftLoginPage.expectRedirectedBackToApp();
+        });
+    });
+});
+```
+
+Conventions to follow:
+
+- Import `test`/`expect` from `@fixtures/base.fixture.ts`, never directly from `@playwright/test` — see [src/fixtures/README.md](src/fixtures/README.md).
+- `test.describe` groups the tests for one feature/page; `test.beforeEach` handles setup shared by every test in the block (e.g. navigating to the login page).
+- Wrap each logical phase of the test in its own `logger.step(NAME, fn)` call — treat it as a Given/When/Then beat rather than one long unstructured test body. Name steps as `SCREAMING_SNAKE_CASE` phrases describing intent (`VERIFY_LOGIN_PAGE`, `ENTER_PORTAL_EMAIL`), not implementation detail.
+- The test body itself should read like a scenario: call page-object `Actions`/`Assertions` methods (`loginPage.login(...)`, `loginPage.expectLoginPageVisible()`) — never raw locators or `expect(...)` calls directly in a spec. See [`src/pages/login.page.ts`](src/pages/login.page.ts) for the method-naming pattern (verb-named methods for actions, `expect...`-prefixed methods for assertions) and [src/base/README.md](src/base/README.md) for what those methods wrap.
+
 ## Project structure
 
 ```
