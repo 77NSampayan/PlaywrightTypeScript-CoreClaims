@@ -10,6 +10,7 @@
       "Bash(git check-ignore:*)"
     ],
     "deny": [
+      "Bash(npx playwright test)",
       "Bash(npx playwright test:*)",
       "Bash(playwright test:*)",
       "Read(./.env)",

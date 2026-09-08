@@ -34,6 +34,8 @@ Config is loaded from `.env` at the repo root via `dotenv` in [playwright.config
 - `VALID_USERNAME_1`, `VALID_PASSWORD_1` — test credentials for the Microsoft SSO login flow (`requireEnv()` throws at config-load time if either is missing)
 - `LOG_LEVEL` — optional, controls `SmartLogger` verbosity (`DEBUG` | `INFO` | `STEP` | `WARN` | `ERROR`, defaults to `INFO`)
 
+**Two files, one tracked.** [.env.example](.env.example) holds placeholders and *is* committed; `.env` holds real values and is **never** committed (it is gitignored). Setup is `cp .env.example .env`, then fill it in — see [README.md](README.md) § Setup. When adding a variable, add it to `.env.example` with a placeholder in the same change.
+
 Never commit real values for these or print credential values in logs/output. Pass `{ mask: true }` to `ElementActions.fill()` for any sensitive **or identifying** field — the logged value becomes `********`.
 
 This matters beyond the console: a `fill()` start message is reused as the `test.step()` name, so an unmasked value is published to the HTML report and the trace as well. For the same reason, never interpolate a credential or account identifier into a `logger.step()` label. A `/password|secret|token|creditcard/i` description sniff is retained as a backstop, but do not rely on it — no honest name for an identity field matches a keyword list.

@@ -22,18 +22,45 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    npx playwright install
    ```
 
-2. Create a `.env` file in the project root with:
+2. Create your local `.env` from the tracked template:
 
-   ```
-   BASE_URL=<portal base URL>
-   VALID_USERNAME_1=<test account email>
-   VALID_PASSWORD_1=<test account password>
-   LOG_LEVEL=INFO
+   ```bash
+   cp .env.example .env      # Windows (cmd):  copy .env.example .env
    ```
 
-   `BASE_URL`, `VALID_USERNAME_1`, and `VALID_PASSWORD_1` are required — the config throws on startup if any are missing. `LOG_LEVEL` is optional (`DEBUG` | `INFO` | `STEP` | `WARN` | `ERROR`, defaults to `INFO`).
+   Then open `.env` and replace the placeholder values with the real ones for
+   your environment. [.env.example](.env.example) documents each variable, but in short:
 
-   `.env` is listed in [.gitignore](.gitignore) and must never be committed — it holds real credentials for a live portal account. If you ever find it tracked (`git ls-files .env` returns a result), untrack it with `git rm --cached .env` and rotate the account password, since the value is preserved in git history.
+   | Variable | Required | Notes |
+   |---|---|---|
+   | `BASE_URL` | yes | Portal base URL — `baseURL` for `page.goto()` |
+   | `VALID_USERNAME_1` | yes | Microsoft SSO test account |
+   | `VALID_PASSWORD_1` | yes | Password for that account |
+   | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
+
+   `requireEnv()` in [playwright.config.ts](playwright.config.ts) throws at config-load
+   time if either credential is missing or empty, so the suite will not start until
+   `.env` exists and is filled in.
+
+   > ### ⚠️ Never commit `.env`
+   >
+   > `.env` holds **real working credentials** once you fill it in. Only
+   > `.env.example` — which contains placeholders — belongs in git.
+   >
+   > `.env` is listed in [.gitignore](.gitignore), so git will refuse to add it
+   > by accident. **Do not override that with `git add -f`, and do not use an
+   > IDE "stage anyway" action on it.** The rule only protects files git isn't
+   > already tracking: once `.env` is committed even once, `.gitignore` becomes
+   > silently inert for it and every later edit is stageable like any normal
+   > file.
+   >
+   > If `git ls-files .env` ever returns a result, untrack it immediately with
+   > `git rm --cached .env` (your local file is left on disk), and **rotate the
+   > account password** — deleting the file does not remove it from history, so
+   > the value stays recoverable from the commits that contained it.
+   >
+   > When you add a new variable, add it to `.env.example` with a placeholder
+   > too, so the next person's copy isn't missing it.
 
 ## Running tests
 
