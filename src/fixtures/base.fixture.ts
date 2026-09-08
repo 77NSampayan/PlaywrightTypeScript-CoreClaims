@@ -3,7 +3,6 @@ import { test as base } from '@playwright/test';
 import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
-// import { apiEndPoints } from '../config/endpoint.config.ts';
 
 
 export type TestFixtures = {
@@ -42,15 +41,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
             logger.highlight(`Platform           : "${process.platform}"`);
         });
  
-        // await logger.step('ENDPOINT CONFIG', async () => {
-        //     logger.info(`Health check       : ${apiEndPoints.health.check}`);
-        //     logger.info(`Login              : ${apiEndPoints.users.login}`);
-        //     logger.info(`Logout             : ${apiEndPoints.users.logout}`);
-        //     logger.info(`Register           : ${apiEndPoints.users.register}`);
-        //     logger.info(`Notes (all)        : ${apiEndPoints.notes.all}`);
-        //     logger.info(`Notes (by ID)      : ${apiEndPoints.notes.byId(':id')}`);
-        // });
- 
         await logger.endTest(true);
         await use();
 
@@ -87,4 +77,4 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 });
 
 export { expect } from '@playwright/test'
-export { apiEndPoints } from '../constants/endpoint.config.ts'
+export { uiEndPoints } from '@constants/endpoint.config.ts'

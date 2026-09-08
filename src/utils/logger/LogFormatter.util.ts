@@ -103,14 +103,15 @@ export class LogFormatter {
   }
 
   /**
-   * Formats the `[END] [PASSED|FAILED] <message>` line that closes a
-   * logger.action() call. Both tags are bold; PASSED stays uncolored
-   * (default), FAILED colors only that word red — the message itself
-   * stays magenta either way.
+   * Formats the `[END] <message>` line that closes a logger.action() call.
+   * The `[END]` tag is bold bright-blue; the message stays magenta.
+   *
+   * Pass/fail is deliberately not tagged here. `logger.action()` emits its
+   * success line at the call's normal level and its failure line at ERROR,
+   * so the level tag already distinguishes them — a red `[ERROR]` marks the
+   * failure without a second redundant tag on the same line.
    */
-  static formatActionEnd(status: 'PASSED' | 'FAILED', message: string): string {
-    const statusColor = status === 'FAILED' ? ANSI.error : undefined;
-    // return `${tag('END', ANSI.end)} ${tag(status, statusColor)} ${this.colorize(message)}`;
+  static formatActionEnd(message: string): string {
     return `${tag('END', ANSI.end)} ${this.colorize(message)}`;
   }
 

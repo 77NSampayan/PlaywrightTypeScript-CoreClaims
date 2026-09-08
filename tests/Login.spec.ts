@@ -14,7 +14,7 @@ test.describe('Amplify Health Product Portal - Login', () => {
             await loginPage.expectLoginPageVisible();
         });
 
-        await logger.step(`ENTER_PORTAL_EMAIL_(${test_credentials.valid_username_1})`, async () => {
+        await logger.step('ENTER_PORTAL_EMAIL', async () => {
             await loginPage.login(test_credentials.valid_username_1);
         });
 

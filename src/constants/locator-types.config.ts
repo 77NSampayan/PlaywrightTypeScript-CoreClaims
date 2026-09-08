@@ -26,6 +26,20 @@ export type ClickOptions = Parameters<Locator['click']>[0];
 // Options: force, timeout, signal, noWaitAfter
 export type FillOptions = Parameters<Locator['fill']>[1];
 
+// ─── ElementActions.fill() ────────────────────
+// Playwright's own fill options, plus one framework flag.
+//
+// This is the one place a derived type is deliberately extended: `mask` is our
+// concern, not Playwright's. Masking has to be a decision made at the call
+// site, because inferring it from the `description` text alone silently fails
+// for honestly-named identity fields — "email field", "member number",
+// "claimant reference" are all as sensitive as a password and none of them
+// match a keyword list.
+export type FillActionOptions = NonNullable<FillOptions> & {
+    /** Force the logged value to be masked, regardless of `description`. */
+    mask?: boolean;
+};
+
 // ─── locator.check() ──────────────────────────
 // Checks a checkbox/radio element.
 // Options: force, position, timeout, trial, signal, noWaitAfter

@@ -21,13 +21,13 @@ export class MicrosoftLoginPage extends BasePage {
     // ─── Actions ──────────────────────────────
 
     async enterEmail(email: string): Promise<void> {
-        await this.elements.fill(this.emailField, email, 'Microsoft email field');
+        await this.elements.fill(this.emailField, email, 'Microsoft email field', { mask: true });
         await this.elements.click(this.primaryButton, 'Next button');
     };
 
     async enterPassword(password: string): Promise<void> {
         await this.elements.waitForVisible(this.passwordField, 'Microsoft password field');
-        await this.elements.fill(this.passwordField, password, 'Microsoft password field');
+        await this.elements.fill(this.passwordField, password, 'Microsoft password field', { mask: true });
         await this.elements.click(this.primaryButton, 'Sign in button');
     };
 

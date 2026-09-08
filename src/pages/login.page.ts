@@ -18,7 +18,7 @@ export class LoginPage extends BasePage {
     // ─── Actions ──────────────────────────────
 
     async login(email: string): Promise<void> {
-        await this.elements.fill(this.emailField, email, 'email field');
+        await this.elements.fill(this.emailField, email, 'email field', { mask: true });
         await this.elements.click(this.signInButton, 'sign in button');
     };
 
