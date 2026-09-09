@@ -59,7 +59,19 @@ export class MicrosoftLoginPage extends BasePage {
             await this.elements.click(this.authenticatorOtpOption, 'Authenticator app OTP option');
         }
 
-        await this.elements.waitForVisible(this.otpCodeField, 'Authenticator OTP field');
+        // MFA itself is not guaranteed to be challenged (trusted device, Conditional
+        // Access) — if the OTP field never shows up, skip this step rather than hang
+        // and fail on a wait that was never going to resolve.
+        const otpFieldAppeared = await this.otpCodeField
+            .waitFor({ state: 'visible', timeout: 5_000 })
+            .then(() => true)
+            .catch(() => false);
+
+        if (!otpFieldAppeared) {
+            this.logger.info('MFA was not challenged for this sign-in — skipping OTP entry.');
+            return;
+        }
+
         await this.elements.fill(this.otpCodeField, generateTOTP(otpSecret, email), 'Authenticator OTP field', { mask: true });
         await this.elements.click(this.submitButton, 'Verify button');
     };
