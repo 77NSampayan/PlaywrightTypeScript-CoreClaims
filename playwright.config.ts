@@ -22,6 +22,15 @@ function requireEnv(name: string): string {
 export const test_credentials = {
   valid_username_1: requireEnv('VALID_USERNAME_1'),
   valid_password_1: requireEnv('VALID_PASSWORD_1'),
+  // Getter, not a plain property: playwright.config.ts is evaluated for every
+  // `npx playwright test` invocation, so an eager requireEnv() here would break
+  // commands that never touch the TOTP flow — e.g. the session-reuse spikes in
+  // AUTHENTICATION.md, which exist specifically to avoid needing this secret.
+  // Deferring the check to first access keeps the fail-loud behavior for
+  // whichever test actually reads it, without punishing every other run.
+  get valid_otp_secret_1(): string {
+    return requireEnv('VALID_OTP_SECRET_1');
+  },
 }
 
 /**

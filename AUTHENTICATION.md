@@ -12,6 +12,24 @@ Microsoft Authenticator is challenged, it is a **push notification to a physical
 device** — there is no secret Playwright can compute, so the second factor
 cannot be automated. It has to be avoided or reused.
 
+> **Update:** this holds for an account whose *only* registered method is the
+> Authenticator push. The automation test account (`VALID_USERNAME_1`) has
+> since had an authenticator app registered in **TOTP/code mode** instead
+> (Security info → Add sign-in method → Authenticator app → "I can't scan the
+> QR code" → save the one-time secret). With that registered, MFA resolves to
+> a computable code — same technique as
+> [eliostruyf.com's M365 login guide](https://www.eliostruyf.com/automating-microsoft-365-login-mfa-playwright-tests/)
+> and its `playwright-m365-helpers` package — and is implemented directly in
+> [`MicrosoftLoginPage.enterAuthenticatorCode()`](src/pages/microsoft-login.page.ts)
+> using this repo's own page-object/logging conventions rather than that
+> package. See `VALID_OTP_SECRET_1` in `.env` and `Login.spec.ts`.
+>
+> This is an option for accounts that have a TOTP method registered, not a
+> replacement for the strategy below: it needs the secret captured once per
+> account, and CA policy could still mandate push-only for other accounts.
+> Session reuse remains the answer for anyone without a TOTP-registered
+> account (e.g. WFH devices using a personal push-only account).
+
 ## The constraint that makes this solvable
 
 MFA is not challenged unconditionally. From the original research:
