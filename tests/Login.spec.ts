@@ -21,7 +21,8 @@ test.describe('Amplify Health Product Portal - Login', () => {
         await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => {
             await microsoftLoginPage.login(
                 test_credentials.valid_username_1,
-                test_credentials.valid_password_1
+                test_credentials.valid_password_1,
+                test_credentials.valid_otp_secret_1
             );
         });
 
