@@ -122,6 +122,27 @@ Conventions to follow:
 - Wrap each logical phase of the test in its own `logger.step(NAME, fn)` call — treat it as a Given/When/Then beat rather than one long unstructured test body. Name steps as `SCREAMING_SNAKE_CASE` phrases describing intent (`VERIFY_LOGIN_PAGE`, `ENTER_PORTAL_EMAIL`), not implementation detail.
 - The test body itself should read like a scenario: call page-object `Actions`/`Assertions` methods (`loginPage.login(...)`, `loginPage.expectLoginPageVisible()`) — never raw locators or `expect(...)` calls directly in a spec. See [`src/pages/login.page.ts`](src/pages/login.page.ts) for the method-naming pattern (verb-named methods for actions, `expect...`-prefixed methods for assertions) and [src/base/README.md](src/base/README.md) for what those methods wrap.
 
+### Tagging tests (optional, recommended once you have more than a couple of specs)
+
+Playwright Test supports a native `tag` option — no BDD framework or extra
+dependency needed: `test('...', { tag: ['@smoke'] }, async (...) => { ... })`.
+Filter a run with `npx playwright test --grep @smoke`.
+
+Tags are **optional** — a spec with no tag is not a convention violation. But
+once you do tag a test, use this fixed set so tags stay meaningful across the
+suite instead of every author inventing their own:
+
+| Tag | Use for |
+|---|---|
+| `@smoke` | The small, fast subset that proves the app isn't fundamentally broken — run on every push |
+| `@regression` | Broader coverage run less frequently (nightly, pre-release) |
+| `@critical` | High business impact — a failure here blocks a release regardless of what else passes |
+| `@wip` | Not yet reliable/complete — excluded from CI via `--grep-invert @wip` until promoted |
+
+A test may carry more than one tag (e.g. `{ tag: ['@smoke', '@critical'] }`).
+Don't invent a new tag ad hoc — if none of these fit, that's a sign the test
+needs a `test.describe` grouping instead, not a fifth tag.
+
 ## Project structure
 
 ```
@@ -143,3 +164,7 @@ Every wrapped action/assertion logs a START/END line to the console and opens a 
 ```bash
 npx playwright show-report
 ```
+
+## Reviewing your changes
+
+Before opening a PR, run `/senior` in Claude Code to get an automated review against this repo's conventions — see [REVIEW.md](REVIEW.md) for how to use it and a pre-flight checklist of the mistakes it catches most often.

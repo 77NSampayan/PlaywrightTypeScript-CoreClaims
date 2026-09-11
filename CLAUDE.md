@@ -85,6 +85,18 @@ read-only reviewer with two modes: `REVIEW` (conventions, correctness, flakiness
 `COVERAGE` (test design and gaps). Bare `/senior` reviews uncommitted changes;
 `/senior <path>` reviews specific files; `/senior coverage` analyses gaps.
 
+**Run it before opening a PR.** [REVIEW.md](REVIEW.md) has the full team guide —
+how to invoke it, what the findings mean, and a pre-flight checklist of the
+mistakes that recur most often in this repo (logging honesty on predicate
+wrappers, hand-rolled option types, assertions that can't fail, locator
+scoping, raw Playwright calls in page objects, test scope/titling).
+
+Every `/senior` run updates a per-branch checklist under
+`.claude/review-tracking/`; `/review-status [branch]` reports progress from
+that file without paying for a fresh review, and flags when it's stale. A
+branch is "approved" only once a `/senior` re-run finds zero open points and
+says so explicitly — see [REVIEW.md](REVIEW.md) § Tracking progress.
+
 It reports ranked findings and never edits. When relaying its report, pass it through
 unmodified rather than summarising it — then apply whatever the user asks for.
 
