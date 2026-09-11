@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { errors, type Locator } from '@playwright/test';
 import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import type {
     ClickOptions,
@@ -9,6 +9,10 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
+    IsEnabledOptions,
+    IsEditableOptions,
+    IsDisabledOptions,
+    IsCheckedOptions
 } from '@constants/locator-types.config.ts';
 
 export class ElementActions {
@@ -100,6 +104,81 @@ export class ElementActions {
             () => locator.waitFor({ ...options, state: 'hidden' }),
             `Element "${description}" is now hidden`,
             `Element "${description}" did not hide within timeout limit`
+        );
+    }
+
+    /**
+     * Soft wait: resolves `true` if the element becomes visible within the
+     * timeout, `false` if it never does. Unlike waitForVisible() this never
+     * throws on a timeout — it is for genuinely optional UI (intermittent
+     * prompts, conditionally-challenged MFA), not for elements that must be
+     * there. Any other error (strict-mode violation, closed page, bad
+     * selector) still propagates — those are real failures, not "absent".
+     */
+    async waitForVisibleSoft(locator: Locator, description: string, options?: WaitForOptions): Promise<boolean> {
+        const waited = options?.timeout ? `${options.timeout}ms` : 'the default timeout';
+
+        return this.logger.action(
+            `Waiting up to ${waited} for optional element "${description}"`,
+            async () => {
+                try {
+                    await locator.waitFor({ ...options, state: 'visible' });
+                    return true;
+                } catch (err) {
+                    if (err instanceof errors.TimeoutError) return false;
+                    throw err;
+                }
+            },
+            (appeared) => `Optional element "${description}" ${appeared ? 'appeared' : 'did not appear'}`,
+            `Failed while waiting for optional element "${description}"`,
+        );
+    }
+
+    // ─── Element State Checkers ─────────────────────────
+
+    /** Instantaneous visibility check — does NOT wait. Use waitForVisibleSoft() to wait for an optional element. */
+    async isVisible(locator: Locator, description: string): Promise<boolean> {
+        return this.logger.action(
+            `Checking visibility of element "${description}"`,
+            () => locator.isVisible(),
+            (visible) => `Element "${description}" is ${visible ? 'visible' : 'not visible'}`,
+            `Failed to determine visibility of element "${description}"`
+        );
+    }
+
+    async isEnabled(locator: Locator, description: string, options?: IsEnabledOptions): Promise<boolean> {
+        return this.logger.action(
+            `Checking if element "${description}" is enabled`,
+            () => locator.isEnabled(options),
+            (enabled) => `Element "${description}" is ${enabled ? 'enabled' : 'not enabled'}`,
+            `Failed to determine enabled state of element "${description}"`
+        );
+    }
+
+    async isChecked(locator: Locator, description: string, options?: IsCheckedOptions): Promise<boolean> {
+        return this.logger.action(
+            `Checking if element "${description}" is checked`,
+            () => locator.isChecked(options),
+            (checked) => `Element "${description}" is ${checked ? 'checked' : 'not checked'}`,
+            `Failed to determine checked state of element "${description}"`
+        );
+    }
+
+    async isEditable(locator: Locator, description: string, options?: IsEditableOptions): Promise<boolean> {
+        return this.logger.action(
+            `Checking if element "${description}" is editable`,
+            () => locator.isEditable(options),
+            (editable) => `Element "${description}" is ${editable ? 'editable' : 'not editable'}`,
+            `Failed to determine editable state of element "${description}"`
+        );
+    }
+
+    async isDisabled(locator: Locator, description: string, options?: IsDisabledOptions): Promise<boolean> {
+        return this.logger.action(
+            `Checking if element "${description}" is disabled`,
+            () => locator.isDisabled(options),
+            (disabled) => `Element "${description}" is ${disabled ? 'disabled' : 'not disabled'}`,
+            `Failed to determine disabled state of element "${description}"`
         );
     }
 }

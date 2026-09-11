@@ -76,3 +76,16 @@ export type ToBeEnabledOptions   = Parameters<LocatorMatchers['toBeEnabled']>[0]
 export type ToBeCheckedOptions   = Parameters<LocatorMatchers['toBeChecked']>[0];
 export type ToHaveTextOptions    = Parameters<LocatorMatchers['toHaveText']>[1];
 export type ToContainTextOptions = Parameters<LocatorMatchers['toContainText']>[1];
+
+// ─── locators ~ state checker options ───────────────
+// ─── locator.isEnabled() / isChecked() / isEditable() / isDisabled() ───
+// These resolve the locator first and honour `timeout` (they throw if the
+// element never attaches), so their options are worth exposing.
+export type IsEnabledOptions  = Parameters<Locator['isEnabled']>[0];
+export type IsCheckedOptions  = Parameters<Locator['isChecked']>[0];
+export type IsEditableOptions = Parameters<Locator['isEditable']>[0];
+export type IsDisabledOptions = Parameters<Locator['isDisabled']>[0];
+
+// Deliberately no IsVisibleOptions / IsHiddenOptions: Playwright marks their
+// only option (`timeout`) @deprecated and ignores it — both return immediately.
+// Exposing it would advertise a wait that does not happen.

@@ -49,10 +49,8 @@ export class MicrosoftLoginPage extends BasePage {
     async enterAuthenticatorCode(email: string, otpSecret: string): Promise<void> {
         // Microsoft sometimes lands straight on the OTP field, and sometimes shows a
         // "pick a sign-in method" screen first — only detour through it when it appears.
-        const methodPickerAppeared = await this.signInAnotherWayLink
-            .waitFor({ state: 'visible', timeout: 2_000 })
-            .then(() => true)
-            .catch(() => false);
+
+        const methodPickerAppeared = await this.elements.waitForVisibleSoft(this.signInAnotherWayLink, 'Sign in another way link', { timeout: 2_000 });
 
         if (methodPickerAppeared) {
             await this.elements.click(this.signInAnotherWayLink, 'Sign in another way link');
@@ -62,10 +60,9 @@ export class MicrosoftLoginPage extends BasePage {
         // MFA itself is not guaranteed to be challenged (trusted device, Conditional
         // Access) — if the OTP field never shows up, skip this step rather than hang
         // and fail on a wait that was never going to resolve.
-        const otpFieldAppeared = await this.otpCodeField
-            .waitFor({ state: 'visible', timeout: 5_000 })
-            .then(() => true)
-            .catch(() => false);
+
+
+        const otpFieldAppeared = await this.elements.waitForVisibleSoft(this.otpCodeField, 'Authenticator OTP field', { timeout: 5_000 });
 
         if (!otpFieldAppeared) {
             this.logger.info('MFA was not challenged for this sign-in — skipping OTP entry.');
@@ -78,10 +75,8 @@ export class MicrosoftLoginPage extends BasePage {
 
     async dismissStaySignedInPrompt(): Promise<void> {
         // Only present intermittently — acknowledge it if it shows up, skip it otherwise.
-        const promptAppeared = await this.staySignedInYesButton
-            .waitFor({ state: 'visible', timeout: 5_000 })
-            .then(() => true)
-            .catch(() => false);
+
+        const promptAppeared = await this.elements.waitForVisibleSoft(this.staySignedInYesButton, 'Stay signed in - Yes button', { timeout: 5_000 });
 
         if (promptAppeared) {
             await this.elements.click(this.staySignedInYesButton, 'Stay signed in - Yes button');
