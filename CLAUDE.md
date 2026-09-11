@@ -20,6 +20,15 @@ npx playwright show-report                   # open the last HTML report
 npx playwright codegen <url>                 # record a new locator/flow
 ```
 
+Every run also writes raw results to `allure-results/` (via the `allure-playwright` reporter alongside `html` in [playwright.config.ts](playwright.config.ts)). Build and view the Allure report from those results with:
+
+```bash
+npx allure generate ./allure-results --clean -o ./allure-report   # build the HTML report
+npx allure open ./allure-report                                  # serve and open it
+```
+
+Both `allure-results/` and `allure-report/` are gitignored — regenerate locally rather than committing them.
+
 Type-check without emitting (tsconfig has `"noEmit": true`):
 
 ```bash
