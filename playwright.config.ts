@@ -73,13 +73,24 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   ...(process.env.CI ? { workers: 1 } : {}),
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  reporter: [
+    ['html'],
+    ['allure-playwright', {
+      resultsDir: 'allure-results',
+      detail: true,
+      suiteTitle: false,
+    }],
+  ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     actionTimeout: 10_000,
     /* Base URL to use in actions like `await page.goto('')`. */
     baseURL: process.env.BASE_URL,
     headless: false,
+    // preprod/UAT (e.g. preprod.app.coreclaims.amplifyhealth.com, reached from a
+    // portal app card) serves a self-signed/internal-CA cert Chromium doesn't trust.
+    // Only acceptable because this targets non-production environments.
+    ignoreHTTPSErrors: true,
     javaScriptEnabled: true,
     launchOptions: {
       args: ['--start-maximized'], // Tells browser to open maximized

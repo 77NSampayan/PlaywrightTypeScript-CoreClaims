@@ -4,6 +4,7 @@ import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { DbConnection, SqliteWasmConnection } from '@utils/db.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
+import { LandingPage } from '@pages/landing.page.ts';
 
 
 export type TestFixtures = {
@@ -13,6 +14,7 @@ export type TestFixtures = {
     microsoftLoginPage: MicrosoftLoginPage;
     dbConnection: DbConnection;
     sqliteConnection: SqliteWasmConnection;
+    landingPage: LandingPage;
 };
 
 export type WorkerFixtures = {
@@ -92,7 +94,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         await sqliteConnection.connect();
         await sqliteConnection.seedClaimsTable();
         await use(sqliteConnection);
-        await sqliteConnection.close();
+        await sqliteConnection.close(); 
+    },
+   landingPage: async ({ page }, use) => {
+        await use(new LandingPage(page));
     }
 });
 
