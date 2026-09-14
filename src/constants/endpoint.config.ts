@@ -7,6 +7,7 @@
 
 export const uiEndPoints = {
     login: '/login',
+    landing: '/',
 } as const
 
 export type UIEndPoints = typeof uiEndPoints;

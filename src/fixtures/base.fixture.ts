@@ -3,6 +3,7 @@ import { test as base } from '@playwright/test';
 import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
+import { LandingPage } from '@pages/landing.page.ts';
 
 
 export type TestFixtures = {
@@ -10,6 +11,7 @@ export type TestFixtures = {
     logger: SmartLogger;
     loginPage: LoginPage;
     microsoftLoginPage: MicrosoftLoginPage;
+    landingPage: LandingPage;
 };
 
 export type WorkerFixtures = {
@@ -73,6 +75,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
     microsoftLoginPage: async ({ page }, use) => {
         await use(new MicrosoftLoginPage(page));
+    },
+
+    landingPage: async ({ page }, use) => {
+        await use(new LandingPage(page));
     }
 });
 
