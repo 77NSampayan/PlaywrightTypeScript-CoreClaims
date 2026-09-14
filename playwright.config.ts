@@ -33,6 +33,27 @@ export const test_credentials = {
   },
 }
 
+// Getters, not plain properties — same reasoning as valid_otp_secret_1 above:
+// only DB-backed specs need these, so an eager requireEnv() here would break
+// every UI-only run for a config value it never touches.
+export const db_config = {
+  get server(): string {
+    return requireEnv('DB_SERVER');
+  },
+  get database(): string {
+    return requireEnv('DB_NAME');
+  },
+  get user(): string {
+    return requireEnv('DB_USER');
+  },
+  get password(): string {
+    return requireEnv('DB_PASSWORD');
+  },
+  get port(): number {
+    return Number(process.env.DB_PORT ?? 1433);
+  },
+}
+
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
