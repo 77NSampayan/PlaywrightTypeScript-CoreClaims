@@ -1,6 +1,7 @@
 import { test as base } from '@playwright/test';
 // import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
 import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
+import { DbConnection, SqliteWasmConnection } from '@utils/db.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
 import { LandingPage } from '@pages/landing.page.ts';
@@ -11,6 +12,8 @@ export type TestFixtures = {
     logger: SmartLogger;
     loginPage: LoginPage;
     microsoftLoginPage: MicrosoftLoginPage;
+    dbConnection: DbConnection;
+    sqliteConnection: SqliteWasmConnection;
     landingPage: LandingPage;
 };
 
@@ -77,7 +80,23 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         await use(new MicrosoftLoginPage(page));
     },
 
-    landingPage: async ({ page }, use) => {
+    // ── Test-scoped: DB connection, opened/closed around the test ──
+    dbConnection: async ({}, use) => {
+        const dbConnection = new DbConnection();
+        await dbConnection.connect();
+        await use(dbConnection);
+        await dbConnection.close();
+    },
+
+    // ── Test-scoped: in-process SQLite Wasm DB, pre-seeded and ready by the time the test body runs ──
+    sqliteConnection: async ({}, use) => {
+        const sqliteConnection = new SqliteWasmConnection();
+        await sqliteConnection.connect();
+        await sqliteConnection.seedClaimsTable();
+        await use(sqliteConnection);
+        await sqliteConnection.close(); 
+    },
+   landingPage: async ({ page }, use) => {
         await use(new LandingPage(page));
     }
 });
