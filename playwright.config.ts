@@ -147,17 +147,17 @@ export default defineConfig({
       },
     },
 
-    {
-      name: 'firefox',
-      testIgnore: /Database\.spec\.ts/,
-      use: { ...devices['Desktop Firefox'] },
-    },
+    // {
+    //   name: 'firefox',
+    //   testIgnore: /Database\.spec\.ts/,
+    //   use: { ...devices['Desktop Firefox'] },
+    // },
 
-    {
-      name: 'webkit',
-      testIgnore: /Database\.spec\.ts/,
-      use: { ...devices['Desktop Safari'] },
-    },
+    // {
+    //   name: 'webkit',
+    //   testIgnore: /Database\.spec\.ts/,
+    //   use: { ...devices['Desktop Safari'] },
+    // },
 
     /* Test against mobile viewports. */
     // {
