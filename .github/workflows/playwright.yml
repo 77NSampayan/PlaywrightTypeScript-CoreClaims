@@ -1,0 +1,39 @@
+name: Static checks (no test execution)
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  typecheck-and-list:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+    - name: Install dependencies
+      run: npm ci
+    # Deliberately does NOT run `npx playwright test`. Login.spec.ts performs a
+    # real Microsoft SSO sign-in (with a real TOTP secret) against a live portal,
+    # and the `db` project connects to a pre-production SQL Server — neither is
+    # safe to run unattended, on every push, from a GitHub-hosted runner with no
+    # network path to that server. See AUTHENTICATION.md § Known risks and
+    # REVIEW.md before changing this. Type-check plus a spec-list is the signal
+    # that's actually safe to run here; revisit once there's a decision on a
+    # dedicated CI service account and/or a self-hosted runner on the project
+    # network.
+    - name: Type-check
+      run: npx tsc --noEmit
+    - name: Verify specs still load
+      run: npx playwright test --list
+      env:
+        # playwright.config.ts checks BASE_URL/VALID_USERNAME_1/VALID_PASSWORD_1
+        # eagerly at config-load time (unlike the DB/OTP vars, which are lazy
+        # getters), so `--list` needs *some* value for each even though it never
+        # runs a test body or attempts a real login/navigation. Placeholders
+        # only — never real credentials or the actual portal URL.
+        BASE_URL: https://ci-placeholder.example.com
+        VALID_USERNAME_1: ci-placeholder@example.com
+        VALID_PASSWORD_1: ci-placeholder

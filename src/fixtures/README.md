@@ -12,10 +12,15 @@ import { test, expect } from '@fixtures/base.fixture.ts';
 
 | Fixture | Scope | Purpose |
 |---|---|---|
-| `configInfo` | worker, `auto: true` | Runs once per worker before any test. Logs active browser, worker/parallel index, `BASE_URL`, `LOG_LEVEL`, Node version, and platform via `logger.step(...)`, so the config used for the run is visible at the top of every worker's output. Marked `auto: true` — it always runs; you never need to declare it in a test. |
+| `configInfo` | worker, `auto: true` | Runs once per worker before any test. Logs the active project name, worker/parallel index, `BASE_URL`, `LOG_LEVEL`, Node version, and platform via `logger.step(...)`, so the config used for the run is visible at the top of every worker's output. Marked `auto: true` — it always runs; you never need to declare it in a test. Deliberately does **not** depend on `{ browser }` — that would launch a browser per worker just to print this banner, including for the browser-less `db` project. |
 | `logger` | test | Calls `logger.setTestContext(testInfo.title)` before the test (prints the START banner) and `logger.endTest(passed)` after (prints the END banner; dumps the log buffer on failure). Yields the shared `SmartLogger` instance — see [`src/utils/logger/README.md`](../utils/logger/README.md). |
+| `assert` | test | Yields a `GenericAssertions` instance — plain-value assertions (`toEqual`, `toContain`, ...) for specs with no Locator/Page to hang them off, e.g. `Database.spec.ts`. See [`src/base/README.md`](../base/README.md). |
 | `loginPage` | test | Yields a new `LoginPage(page)` — see [`src/pages/login.page.ts`](../pages/login.page.ts). |
 | `microsoftLoginPage` | test | Yields a new `MicrosoftLoginPage(page)` — see [`src/pages/microsoft-login.page.ts`](../pages/microsoft-login.page.ts). |
+| `landingPage` | test | Yields a new `LandingPage(page)` — see [`src/pages/landing.page.ts`](../pages/landing.page.ts). |
+| `dbConnection` | test | Opens a `DbConnection` against the pre-production `data_enrichment` database before the test and closes it after — see [`src/utils/db.util.ts`](../utils/db.util.ts). |
+| `membershipDbConnection` | test | Same as `dbConnection`, against the separate Membership database (`membership_db_config`). |
+| `sqliteConnection` | test | Opens an in-process `SqliteWasmConnection`, seeds a `claims` table (`seedClaimsTable()`), and closes it after the test. No external server involved. |
 
 ### Also re-exported from here
 

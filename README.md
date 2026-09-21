@@ -33,14 +33,21 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
 
    | Variable | Required | Notes |
    |---|---|---|
-   | `BASE_URL` | yes | Portal base URL — `baseURL` for `page.goto()` |
-   | `VALID_USERNAME_1` | yes | Microsoft SSO test account |
-   | `VALID_PASSWORD_1` | yes | Password for that account |
+   | `BASE_URL` | always | Portal base URL — `baseURL` for `page.goto()` |
+   | `VALID_USERNAME_1` | always | Microsoft SSO test account |
+   | `VALID_PASSWORD_1` | always | Password for that account |
+   | `VALID_OTP_SECRET_1` | only for the SSO login spec's MFA step | TOTP seed for the account's authenticator |
+   | `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
+   | `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `membershipDbConnection`-backed specs | Separate server/credentials from the DB above. Same read-only-account guidance applies. |
    | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
 
    `requireEnv()` in [playwright.config.ts](playwright.config.ts) throws at config-load
-   time if either credential is missing or empty, so the suite will not start until
-   `.env` exists and is filled in.
+   time — but not all of the above eagerly. `BASE_URL`/`VALID_USERNAME_1`/`VALID_PASSWORD_1`
+   are checked immediately, so the suite will not start at all without them. The rest are
+   lazy getters, checked only the first time a spec that actually needs them reads the
+   value — a UI-only run never has to configure DB credentials, and a DB-only run never
+   has to configure the SSO account. See the comments on `db_config`/`membership_db_config`
+   in [playwright.config.ts](playwright.config.ts) for why.
 
    > ### ⚠️ Never commit `.env`
    >
@@ -67,15 +74,20 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
 There are no `npm` scripts defined; use the Playwright CLI directly.
 
 ```bash
-npx playwright test                          # run the full suite (chromium, firefox, webkit)
+npx playwright test                          # run the full suite (db, msedge, firefox, webkit)
 npx playwright test tests/Login.spec.ts      # run a single spec file
 npx playwright test -g "Successful login"    # run a single test by title
-npx playwright test --project=chromium       # run against one browser only
+npx playwright test --project=msedge         # run against one browser only
 npx playwright show-report                   # open the last HTML report
 npx playwright codegen <url>                 # record a new flow/locators
 ```
 
-Browsers run **headed** and maximized by default (see [playwright.config.ts](playwright.config.ts)).
+Browsers run **headed** and maximized locally by default; `headless` is forced on
+automatically when `CI` is set, since a CI runner has no display (see
+[playwright.config.ts](playwright.config.ts)). DB-backed specs (`Database.spec.ts`)
+run under their own `db` project instead of the browser projects — they touch no
+page, so running them under msedge/firefox/webkit too would just be the same
+query three times over.
 
 ## Writing test specs
 
@@ -149,8 +161,9 @@ needs a `test.describe` grouping instead, not a fifth tag.
 src/
   base/         Shared base page + element action/assertion wrappers
   constants/    Endpoint URLs and Playwright option types
-  fixtures/     Custom test fixtures (page objects, logger)
+  fixtures/     Custom test fixtures (page objects, DB connections, logger)
   pages/        Page objects (one per screen/flow)
+  utils/db.util.ts  MSSQL (DbConnection) and in-process SQLite Wasm connection wrappers
   utils/logger/ SmartLogger, log level, and console formatting
 tests/          Playwright specs
 ```

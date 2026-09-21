@@ -12,44 +12,54 @@ import sql from 'mssql';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Database as SqliteDatabase } from '@sqlite.org/sqlite-wasm';
 import { logger } from '@utils/logger/SmartLogger.util.ts';
-import { db_config } from '@root/playwright.config.ts';
+
+export type DbConfig = {
+    server: string;
+    database: string;
+    user: string;
+    password: string;
+    port: number;
+};
 
 export class DbConnection {
 
     private pool: sql.ConnectionPool | undefined;
 
+    constructor(private readonly config: DbConfig) {}
+
     async connect(): Promise<void> {
         await logger.action(
-            `Connecting to database "${db_config.database}"`,
+            `Connecting to database "${this.config.database}"`,
             async () => {
                 this.pool = await new sql.ConnectionPool({
-                    server: db_config.server,
-                    database: db_config.database,
-                    user: db_config.user,
-                    password: db_config.password,
-                    port: db_config.port,
+                    server: this.config.server,
+                    database: this.config.database,
+                    user: this.config.user,
+                    password: this.config.password,
+                    port: this.config.port,
                     options: {
                         encrypt: true,
                         trustServerCertificate: false,
                     },
                 }).connect();
             },
-            `Connected to database "${db_config.database}"`,
-            `Failed to connect to database "${db_config.database}"`
+            `Connected to database "${this.config.database}"`,
+            `Failed to connect to database "${this.config.database}"`
         );
     }
 
-    async query<T = Record<string, unknown>>(queryText: string, description: string): Promise<sql.IResult<T>> {
+    async query<T = Record<string, unknown>>(queryText: string, description: string): Promise<T[]> {
         if (!this.pool) {
             throw new Error('DbConnection.connect() must succeed before query() can be called.');
         }
 
-        return logger.action(
+        const result = await logger.action(
             `Running query "${description}"`,
             () => this.pool!.request().query<T>(queryText),
             (result) => `Query "${description}" returned ${result.recordset.length} row(s)`,
             `Query "${description}" failed`
         );
+        return result.recordset;
     }
 
     async close(): Promise<void> {

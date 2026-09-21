@@ -1,27 +1,38 @@
 import { test } from '@fixtures/base.fixture.ts';
-import { GenericAssertions } from '@base/GenericAssertions.util.ts';
-import { logger } from '@utils/logger/SmartLogger.util.ts';
-
-// Standalone plain-value assertions — no Locator/Page involved, so this
-// doesn't live on a page object; see src/base/README.md.
-const assert = new GenericAssertions(logger);
+import { db_config, membership_db_config } from '@root/playwright.config.ts';
 
 test.describe('Database Connectivity', () => {
-    test('Connects to the database and runs a smoke-test query', async ({ dbConnection, logger }) => {
+    test('Connects to the database and runs a smoke-test query', async ({ dbConnection, assert, logger }) => {
         await logger.step('RUN_SMOKE_QUERY', async () => {
-            const result = await dbConnection.query<{ result: number }>(
-                'SELECT 1 AS result',
+            const rows = await dbConnection.query<{ db: string }>(
+                'SELECT DB_NAME() AS db',
                 'connectivity smoke test'
             );
 
-            await assert.toEqual(result.recordset.length, 1, 'smoke query row count');
-            await assert.toEqual(result.recordset[0]?.result, 1, 'smoke query result value');
+            await assert.toEqual(rows.length, 1, 'smoke query row count');
+            await assert.toEqual(rows[0]?.db, db_config.database, 'connected database name');
+        });
+    });
+
+    test('Connects to the Membership database and runs a smoke-test query', async ({ membershipDbConnection, assert, logger }) => {
+        await logger.step('RUN_SMOKE_QUERY', async () => {
+            const rows = await membershipDbConnection.query<{ db: string }>(
+                'SELECT DB_NAME() AS db',
+                'Membership connectivity smoke test'
+            );
+
+            await assert.toEqual(rows.length, 1, 'smoke query row count');
+            await assert.toEqual(rows[0]?.db, membership_db_config.database, 'connected database name');
         });
     });
 });
 
 test.describe('SQLite Wasm', () => {
-    test('Queries the pre-seeded claims table', async ({ sqliteConnection, logger }) => {
+    // Capability spike, not product coverage: this only proves @sqlite.org/sqlite-wasm
+    // runs in this Node/ESM setup — it asserts back the exact rows seedClaimsTable()
+    // just inserted, so it can't fail for a Core Claims reason. Tagged @wip so it
+    // doesn't read as claims coverage; see README.md's tag table.
+    test('SQLite Wasm in-process engine is usable from Node', { tag: ['@wip'] }, async ({ sqliteConnection, assert, logger }) => {
         await logger.step('QUERY_SEEDED_CLAIMS_TABLE', async () => {
             const rows = await sqliteConnection.query<{ claim_number: string; status: string }>(
                 'SELECT claim_number, status FROM claims ORDER BY id',
