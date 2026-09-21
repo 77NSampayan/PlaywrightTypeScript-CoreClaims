@@ -143,7 +143,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
-        viewport: null, //Bypass Playwright's default 1280x720 resolution
+       // viewport: null, //Bypass Playwright's default 1280x720 resolution
       },
     },
 
