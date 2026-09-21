@@ -32,11 +32,11 @@ const SAMPLE_PLAN = {
     contractEnd: POLICY_END_DATE,
 };
 
-// "MALE" confirmed against the real dropdown (options are "Not Selected",
-// "MALE", "FEMALE", "OTHER" — all caps, and getByRole's exact:true matching is
-// case-sensitive, which is also why exact:true is required here at all: "MALE"
-// is literally a substring of "FEMALE"). "Primary" for Participation is still
-// an unverified guess — confirm against that dropdown's real options.
+// "MALE" and "PRINCIPAL" confirmed against the real dropdowns — both are
+// all-caps enums (Gender: "Not Selected"/"MALE"/"FEMALE"/"OTHER"; Participation:
+// "Not Selected"/"PRINCIPAL"/"SPOUSE"/"CHILD"/"DEPENDANT"). getByRole's
+// exact:true matching is case-sensitive, which is also why exact:true is
+// required here at all — "MALE" is literally a substring of "FEMALE".
 // "Juan Dela Cruz" is the standard Filipino placeholder name (the "John Doe"
 // equivalent), not a real person.
 const SAMPLE_MEMBER = {
@@ -46,7 +46,7 @@ const SAMPLE_MEMBER = {
     dateOfBirth: '1990-01-01',
     gender: 'MALE',
     nationalIdentificationNumber: '000000000000',
-    participation: 'Primary',
+    participation: 'PRINCIPAL', // this member is the primary/main member
     depNo: '0',
     terminateDate: POLICY_END_DATE,
     markAsPatient: true, // only member being added — "exactly one patient per claim"
