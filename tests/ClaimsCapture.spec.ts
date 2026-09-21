@@ -32,8 +32,11 @@ const SAMPLE_PLAN = {
     contractEnd: POLICY_END_DATE,
 };
 
-// TODO: "Male" / "Primary" are unverified guesses at the actual option text in
-// the Gender / Participation dropdowns — confirm against the real dropdowns.
+// "MALE" confirmed against the real dropdown (options are "Not Selected",
+// "MALE", "FEMALE", "OTHER" — all caps, and getByRole's exact:true matching is
+// case-sensitive, which is also why exact:true is required here at all: "MALE"
+// is literally a substring of "FEMALE"). "Primary" for Participation is still
+// an unverified guess — confirm against that dropdown's real options.
 // "Juan Dela Cruz" is the standard Filipino placeholder name (the "John Doe"
 // equivalent), not a real person.
 const SAMPLE_MEMBER = {
@@ -41,7 +44,7 @@ const SAMPLE_MEMBER = {
     firstName: 'Juan',
     surname: 'Dela Cruz',
     dateOfBirth: '1990-01-01',
-    gender: 'Male',
+    gender: 'MALE',
     nationalIdentificationNumber: '000000000000',
     participation: 'Primary',
     depNo: '0',
