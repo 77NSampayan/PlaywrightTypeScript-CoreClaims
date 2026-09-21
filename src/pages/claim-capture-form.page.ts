@@ -97,7 +97,10 @@ export class ClaimCaptureFormPage extends BasePage {
         // No formcontrolname exposed on this dropdown — scoped by its wrapping
         // label's id instead, which stays stable regardless of selection state
         // (unlike the dropdown's own aria-label, which changes to the picked value).
-        this.claimCurrencyDropdown = this.page.locator('#claim-validation-claimCurrency p-dropdown');
+        // Targets [role="combobox"], not the outer <p-dropdown> tag: that wrapper
+        // is a component host element and may render with no box of its own, in
+        // which case a click on it never lands on the real widget underneath.
+        this.claimCurrencyDropdown = this.page.locator('#claim-validation-claimCurrency p-dropdown [role="combobox"]');
 
         this.accountDateInput = this.page.locator('p-calendar[formcontrolname="accountDate"] input');
         this.policyIdInput    = this.page.locator('input[formcontrolname="policyId"]');
@@ -121,11 +124,11 @@ export class ClaimCaptureFormPage extends BasePage {
         this.memberSurnameInput   = this.coveredMembersSection.locator('input[formcontrolname="surname"]');
         this.memberDateOfBirthInput = this.coveredMembersSection.locator('p-calendar[formcontrolname="dateOfBirth"] input');
         this.memberDateOfDeathInput = this.coveredMembersSection.locator('p-calendar[formcontrolname="dateOfDeath"] input');
-        this.memberGenderDropdown  = this.coveredMembersSection.locator('p-dropdown[formcontrolname="gender"]');
+        this.memberGenderDropdown  = this.coveredMembersSection.locator('p-dropdown[formcontrolname="gender"] [role="combobox"]');
         this.memberNationalIdInput = this.coveredMembersSection.locator('input[formcontrolname="nationalIdentificationNumber"]');
         this.memberIdentifierInput = this.coveredMembersSection.locator('input[formcontrolname="identifier"]');
-        this.memberInitialsDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="initials"]');
-        this.memberParticipationDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="participation"]');
+        this.memberInitialsDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="initials"] [role="combobox"]');
+        this.memberParticipationDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="participation"] [role="combobox"]');
         this.memberDepNoInput      = this.coveredMembersSection.locator('input[formcontrolname="depNo"]');
         this.memberJoinDateInput   = this.coveredMembersSection.locator('p-calendar[formcontrolname="joinDate"] input');
         this.memberTerminateDateInput = this.coveredMembersSection.locator('p-calendar[formcontrolname="terminateDate"] input');
@@ -134,7 +137,7 @@ export class ClaimCaptureFormPage extends BasePage {
         this.memberStatusInput    = this.coveredMembersSection.locator('fieldset[formgroupname="status"] input[formcontrolname="id"]');
         this.memberYearsOfMembershipInput = this.coveredMembersSection.locator('input[formcontrolname="yearsOfMembership"]');
         this.memberIsPatientCheckbox = this.coveredMembersSection.locator('p-checkbox[formcontrolname="isPatient"] .p-checkbox-box');
-        this.memberPhilHealthDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="isMembersPhilHealth"]');
+        this.memberPhilHealthDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="isMembersPhilHealth"] [role="combobox"]');
         this.confirmAddMemberButton = this.coveredMembersSection.getByRole('button', { name: 'Add', exact: true });
 
         this.nextButton        = this.page.getByRole('button', { name: 'Next' });
@@ -195,12 +198,13 @@ export class ClaimCaptureFormPage extends BasePage {
         await this.elements.fill(this.cardIdInput, value, 'Card ID field');
     };
 
-    // PrimeNG dropdown: click to open the overlay (appended to <body>, so the
-    // option list isn't nested under the dropdown in the DOM), then click the
-    // option by its accessible role — assumes standard combobox/listbox markup
-    // (role="option" per the aria-haspopup="listbox" on the trigger); worth
-    // confirming once this actually runs against the real dropdown. Shared by
-    // every p-dropdown on this form (currency, gender, participation, ...).
+    // PrimeNG dropdown: click the combobox to open the overlay (appended to
+    // <body>, so the option list isn't nested under the dropdown in the DOM),
+    // then click the option by its accessible role — confirmed against the
+    // real Gender dropdown's markup (<li role="option" aria-label="MALE">).
+    // exact:true matters here specifically because it's case-sensitive AND
+    // because option text can be a substring of another option's (MALE/FEMALE).
+    // Shared by every p-dropdown on this form (currency, gender, participation, ...).
     private async selectDropdownOption(dropdown: Locator, optionText: string, description: string): Promise<void> {
         await this.elements.click(dropdown, description);
         await this.elements.click(
