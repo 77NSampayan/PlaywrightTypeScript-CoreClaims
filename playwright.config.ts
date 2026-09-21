@@ -143,21 +143,27 @@ export default defineConfig({
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
-        viewport: null, //Bypass Playwright's default 1280x720 resolution
+        //viewport: null, //Bypass Playwright's default 1280x720 resolution
       },
     },
 
-    // {
-    //   name: 'firefox',
-    //   testIgnore: /Database\.spec\.ts/,
-    //   use: { ...devices['Desktop Firefox'] },
-    // },
+    {
+      name: 'firefox',
+      testIgnore: /Database\.spec\.ts/,
+      use: { ...devices['Desktop Firefox'] },
+    },
 
-    // {
-    //   name: 'webkit',
-    //   testIgnore: /Database\.spec\.ts/,
-    //   use: { ...devices['Desktop Safari'] },
-    // },
+    {
+      name: 'webkit',
+      testIgnore: /Database\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
+
+    {
+      name: 'chrome',
+      testIgnore: /Database\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    },
 
     /* Test against mobile viewports. */
     // {
@@ -173,10 +179,6 @@ export default defineConfig({
     // {
     //   name: 'chromium',
     //   use: { viewport: null },
-    // },
-    // {
-    //   name: 'chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     // },
   ],
 

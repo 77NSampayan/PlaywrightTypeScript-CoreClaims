@@ -9,6 +9,7 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
+    PressSequentiallyOptions,
     IsEnabledOptions,
     IsEditableOptions,
     IsDisabledOptions,
@@ -46,6 +47,21 @@ export class ElementActions {
             () => locator.fill(value, fillOptions),
             `Successfully filled text into element "${description}"`,
             `Failed to fill text into element "${description}"`
+        );
+    }
+
+    /**
+     * Types character by character instead of setting the value in bulk —
+     * needed for components (e.g. PrimeNG's p-calendar) that parse input per
+     * keystroke and never pick up a fill()-set value. Prefer fill() by default;
+     * reach for this only when fill() demonstrably doesn't register.
+     */
+    async pressSequentially(locator: Locator, value: string, description: string, options?: PressSequentiallyOptions): Promise<void> {
+        await this.logger.action(
+            `Typing "${value}" into element "${description}"`,
+            () => locator.pressSequentially(value, options),
+            `Successfully typed text into element "${description}"`,
+            `Failed to type text into element "${description}"`
         );
     }
 

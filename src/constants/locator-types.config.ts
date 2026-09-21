@@ -65,6 +65,13 @@ export type WaitForOptions = Parameters<Locator['waitFor']>[0];
 
 export type GetTextOptions = Parameters<Locator['textContent']>[0];
 
+// ─── locator.pressSequentially() ──────────────
+// Types text one character at a time, dispatching real keyboard events —
+// needed for components that parse input per keystroke (e.g. PrimeNG's
+// p-calendar) rather than reacting to a bulk value set the way fill() does.
+// Options: delay, noWaitAfter, timeout
+export type PressSequentiallyOptions = Parameters<Locator['pressSequentially']>[1];
+
 
 // ─── expect(locator) assertions ───────────────
 // Options types for LocatorAssertions matchers — index 0 for
