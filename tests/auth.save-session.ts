@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────
 //  auth.save-session.ts
-//  SPIKE — step 1 of the session-reuse question in AUTHENTICATION.md.
+//  SPIKE — step 1 of the session-reuse question: save an authenticated
+//  session to disk so it can be replayed instead of logging in live.
+//  Step 2 is tests/auth.verify-session.ts.
 //
 //  Opens a browser, waits for YOU to sign in by hand (including the
 //  Authenticator push), then persists the resulting session to disk.

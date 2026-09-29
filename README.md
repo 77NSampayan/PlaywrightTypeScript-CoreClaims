@@ -36,6 +36,7 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    | `BASE_URL` | yes | Portal base URL — `baseURL` for `page.goto()` |
    | `VALID_USERNAME_1` | yes | Microsoft SSO test account |
    | `VALID_PASSWORD_1` | yes | Password for that account |
+   | `VALID_OTP_SECRET_1` | yes | TOTP secret for that account's authenticator app — powers automated MFA (see [§ Authentication & MFA](#authentication--mfa-microsoft-sso)). Validated lazily, so runs that never reach the SSO flow don't need it |
    | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
 
    `requireEnv()` in [playwright.config.ts](playwright.config.ts) throws at config-load
@@ -61,6 +62,51 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    >
    > When you add a new variable, add it to `.env.example` with a placeholder
    > too, so the next person's copy isn't missing it.
+
+## Authentication & MFA (Microsoft SSO)
+
+The portal signs in through Microsoft SSO, and the test account's second factor
+is resolved automatically during a run — no physical device or manual approval.
+
+### How it works
+
+The automation account (`VALID_USERNAME_1`) has an authenticator app registered
+in **TOTP / one-time-code mode**, so its second factor is a 6-digit code derived
+from a shared secret rather than a push notification. Playwright computes that
+code exactly the way an authenticator app does, using the
+[`otpauth`](https://github.com/hectorm/otpauth) library:
+
+- [`src/utils/totp.util.ts`](src/utils/totp.util.ts) — `generateTOTP(secret, label)`
+  wraps `otpauth`'s `TOTP` (SHA1, 6 digits, 30s period — the Microsoft default).
+- [`src/pages/microsoft-login.page.ts`](src/pages/microsoft-login.page.ts) —
+  `enterAuthenticatorCode()` generates the code and fills it (masked) when the
+  OTP screen appears; `login(email, password, otpSecret)` runs the full flow.
+
+MFA is **conditional** — on a trusted device/network Microsoft may not challenge
+it at all. `enterAuthenticatorCode()` handles both cases: it soft-waits for the
+OTP field and simply skips code entry when the challenge isn't shown, so the flow
+never hangs waiting for a factor that was never requested.
+
+### One-time setup — capturing the TOTP secret
+
+Register the authenticator in code mode once per account and save the secret:
+
+> In Microsoft **Security info → Add sign-in method → Authenticator app →
+> "I can't scan the QR code"**, copy the one-time secret shown and put it in
+> `.env` as `VALID_OTP_SECRET_1`.
+
+Treat this secret as sensitive — **it is the second factor.** It is masked in all
+logs, console output, and the HTML report, and is never printed. Add it to
+[.env.example](.env.example) as a placeholder only, never a real value (see § Setup).
+
+### Scope & limitations
+
+- Works only for accounts with a **TOTP** method registered. An account whose
+  only factor is an Authenticator **push** cannot be automated this way — there
+  is no secret to compute.
+- Conditional Access is owned by IT and can change without notice. If sign-ins
+  suddenly start timing out on a trusted network, suspect a CA policy change
+  before an app defect.
 
 ## Running tests
 
@@ -104,7 +150,8 @@ test.describe('Amplify Health Product Portal - Login', () => {
         await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => { // When
             await microsoftLoginPage.login(
                 test_credentials.valid_username_1,
-                test_credentials.valid_password_1
+                test_credentials.valid_password_1,
+                test_credentials.valid_otp_secret_1        // automated MFA — see § Authentication & MFA
             );
         });
 
