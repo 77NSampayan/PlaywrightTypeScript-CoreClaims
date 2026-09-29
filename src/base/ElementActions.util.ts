@@ -15,10 +15,45 @@ import type {
     IsCheckedOptions
 } from '@constants/locator-types.config.ts';
 
+/**
+ * Locator-level interactions, each wrapped in `logger.action(...)` so every
+ * call logs a START/END line and opens a matching step in the HTML report and
+ * trace viewer. `BasePage` constructs one instance per page object and exposes
+ * it as `this.elements` — page objects call these methods instead of touching
+ * raw Playwright locators, which is what keeps the logs and report complete.
+ *
+ * Every method takes a human-readable `description` (e.g. `'sign in button'`)
+ * that is embedded in the log/step text — write it so `Clicking element "X"`
+ * reads naturally.
+ *
+ * @example Inside a page object
+ * ```ts
+ * export class LoginPage extends BasePage {
+ *     private readonly signInButton = this.page.getByRole('button', { name: 'Sign in' });
+ *
+ *     async submit(): Promise<void> {
+ *         await this.elements.click(this.signInButton, 'sign in button');
+ *     }
+ * }
+ * ```
+ */
 export class ElementActions {
 
     constructor(private readonly logger: SmartLogger) {}
 
+    /**
+     * Clicks an element (Playwright auto-waits for it to be actionable first).
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report (e.g. `'sign in button'`).
+     * @param options - Playwright `locator.click()` options (`force`, `button`, `clickCount`, `position`, …).
+     * @returns Resolves once the click completes.
+     *
+     * @example
+     * ```ts
+     * await this.elements.click(this.submitButton, 'submit button');
+     * ```
+     */
     async click(locator: Locator, description: string, options?: ClickOptions): Promise<void> {
         await this.logger.action(
             `Clicking element "${description}"`,
@@ -28,6 +63,32 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Fills a text input/textarea with `value` (clears it first, like Playwright's `fill`).
+     *
+     * ⚠️ **Masking.** Pass `{ mask: true }` for any sensitive **or identifying**
+     * field (password, email, member ID, …). The start message becomes the
+     * `test.step()` name, so an unmasked value would be published to the console,
+     * the HTML report **and** the trace. The `/password|secret|token|creditcard/i`
+     * name sniff is only a backstop — do not rely on it, since no honest field
+     * name matches that list.
+     *
+     * @param locator - The target input/textarea.
+     * @param value - The text to type in.
+     * @param description - Human-readable field name for logs/report.
+     * @param options - Playwright `locator.fill()` options, plus `mask?: boolean`
+     *                  (this class's own flag; stripped before reaching Playwright).
+     * @returns Resolves once the field is filled.
+     *
+     * @example Ordinary field
+     * ```ts
+     * await this.elements.fill(this.searchBox, 'claims', 'claims search box');
+     * ```
+     * @example Sensitive / identifying field — always mask
+     * ```ts
+     * await this.elements.fill(this.passwordField, password, 'password field', { mask: true });
+     * ```
+     */
     async fill(locator: Locator, value: string, description: string, options?: FillActionOptions): Promise<void> {
         const { mask, ...fillOptions } = options ?? {};
 
@@ -49,6 +110,19 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Checks a checkbox or radio button. No-op if it is already checked.
+     *
+     * @param locator - The checkbox/radio element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.check()` options (`force`, `position`, …).
+     * @returns Resolves once the element is checked.
+     *
+     * @example
+     * ```ts
+     * await this.elements.check(this.termsCheckbox, 'accept terms checkbox');
+     * ```
+     */
     async check(locator: Locator, description: string, options?: CheckOptions): Promise<void> {
         await this.logger.action(
             `Checking element "${description}"`,
@@ -58,6 +132,19 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Unchecks a checkbox. No-op if it is already unchecked.
+     *
+     * @param locator - The checkbox element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.uncheck()` options (`force`, `position`, …).
+     * @returns Resolves once the element is unchecked.
+     *
+     * @example
+     * ```ts
+     * await this.elements.uncheck(this.rememberMeCheckbox, 'remember me checkbox');
+     * ```
+     */
     async uncheck(locator: Locator, description: string, options?: UncheckOptions): Promise<void> {
         await this.logger.action(
             `Unchecking element "${description}"`,
@@ -67,6 +154,25 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Selects one or more options in a `<select>` dropdown, by value, label, or index.
+     *
+     * @param locator - The `<select>` element.
+     * @param values - What to select: a value string, `{ label }` / `{ index }` / `{ value }`,
+     *                 or an array of these for multi-select.
+     * @param description - Human-readable dropdown name for logs/report.
+     * @param options - Playwright `locator.selectOption()` options (`force`, `timeout`).
+     * @returns Resolves once the option(s) are selected.
+     *
+     * @example By value
+     * ```ts
+     * await this.elements.selectOption(this.statusDropdown, 'approved', 'status dropdown');
+     * ```
+     * @example By visible label
+     * ```ts
+     * await this.elements.selectOption(this.statusDropdown, { label: 'Approved' }, 'status dropdown');
+     * ```
+     */
     async selectOption(locator: Locator, values: SelectOptionValues, description: string, options?: SelectOptionOptions): Promise<void> {
         // Stringify values array if multi-select to keep the console print clean
         const serializedValues = Array.isArray(values) ? values.join(', ') : String(values);
@@ -79,6 +185,20 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Returns an element's text content, or `''` when it has none (never `null`).
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.textContent()` options (`timeout`).
+     * @returns The element's text, or an empty string.
+     *
+     * @example
+     * ```ts
+     * const banner = await this.elements.getText(this.welcomeBanner, 'welcome banner');
+     * // assert with this.assert.toContain(banner, 'Welcome', 'welcome banner text');
+     * ```
+     */
     async getText(locator: Locator, description: string, options?: GetTextOptions): Promise<string> {
         return this.logger.action(
             `Extracting text value from "${description}"`,
@@ -89,6 +209,21 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Waits until an element is visible. **Throws** (failing the test) if it does
+     * not become visible within the timeout — use this for elements that *must*
+     * appear. For genuinely optional UI, use {@link waitForVisibleSoft} instead.
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.waitFor()` options (`timeout`); `state` is forced to `'visible'`.
+     * @returns Resolves once the element is visible.
+     *
+     * @example
+     * ```ts
+     * await this.elements.waitForVisible(this.dashboardHeader, 'dashboard header');
+     * ```
+     */
     async waitForVisible(locator: Locator, description: string, options?: WaitForOptions): Promise<void> {
         await this.logger.action(
             `Waiting for element "${description}" to be visible`,
@@ -98,6 +233,21 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Waits until an element is hidden (or detached). **Throws** if it is still
+     * visible after the timeout — use it to confirm something disappears
+     * (spinner, toast, modal).
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.waitFor()` options (`timeout`); `state` is forced to `'hidden'`.
+     * @returns Resolves once the element is hidden.
+     *
+     * @example
+     * ```ts
+     * await this.elements.waitForHidden(this.loadingSpinner, 'loading spinner');
+     * ```
+     */
     async waitForHidden(locator: Locator, description: string, options?: WaitForOptions): Promise<void> {
         await this.logger.action(
             `Waiting for element "${description}" to be hidden`,
@@ -114,6 +264,18 @@ export class ElementActions {
      * prompts, conditionally-challenged MFA), not for elements that must be
      * there. Any other error (strict-mode violation, closed page, bad
      * selector) still propagates — those are real failures, not "absent".
+     *
+     * @param locator - The (optional) target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.waitFor()` options; pass a short `timeout`
+     *                  so an absent element doesn't cost the full default wait.
+     * @returns `true` if it appeared, `false` if it timed out without appearing.
+     *
+     * @example Branch on an intermittent prompt
+     * ```ts
+     * const shown = await this.elements.waitForVisibleSoft(this.cookieBanner, 'cookie banner', { timeout: 2_000 });
+     * if (shown) await this.elements.click(this.acceptCookiesButton, 'accept cookies button');
+     * ```
      */
     async waitForVisibleSoft(locator: Locator, description: string, options?: WaitForOptions): Promise<boolean> {
         const waited = options?.timeout ? `${options.timeout}ms` : 'the default timeout';
@@ -136,7 +298,22 @@ export class ElementActions {
 
     // ─── Element State Checkers ─────────────────────────
 
-    /** Instantaneous visibility check — does NOT wait. Use waitForVisibleSoft() to wait for an optional element. */
+    /**
+     * Instantaneous visibility check — does **not** wait. Returns the element's
+     * current visibility right now. To *wait* for an optional element, use
+     * {@link waitForVisibleSoft}; to wait for a required one, {@link waitForVisible}.
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @returns `true` if visible at the moment of the call, otherwise `false`.
+     *
+     * @example
+     * ```ts
+     * if (await this.elements.isVisible(this.errorBanner, 'error banner')) {
+     *     // handle the already-rendered error
+     * }
+     * ```
+     */
     async isVisible(locator: Locator, description: string): Promise<boolean> {
         return this.logger.action(
             `Checking visibility of element "${description}"`,
@@ -146,6 +323,19 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Reports whether an element is enabled (not disabled).
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.isEnabled()` options (`timeout`).
+     * @returns `true` if enabled, otherwise `false`.
+     *
+     * @example
+     * ```ts
+     * const canSubmit = await this.elements.isEnabled(this.submitButton, 'submit button');
+     * ```
+     */
     async isEnabled(locator: Locator, description: string, options?: IsEnabledOptions): Promise<boolean> {
         return this.logger.action(
             `Checking if element "${description}" is enabled`,
@@ -155,6 +345,19 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Reports whether a checkbox or radio button is checked.
+     *
+     * @param locator - The checkbox/radio element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.isChecked()` options (`timeout`).
+     * @returns `true` if checked, otherwise `false`.
+     *
+     * @example
+     * ```ts
+     * const accepted = await this.elements.isChecked(this.termsCheckbox, 'accept terms checkbox');
+     * ```
+     */
     async isChecked(locator: Locator, description: string, options?: IsCheckedOptions): Promise<boolean> {
         return this.logger.action(
             `Checking if element "${description}" is checked`,
@@ -164,6 +367,19 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Reports whether an element is editable (visible, enabled, and not readonly).
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.isEditable()` options (`timeout`).
+     * @returns `true` if editable, otherwise `false`.
+     *
+     * @example
+     * ```ts
+     * const editable = await this.elements.isEditable(this.notesField, 'notes field');
+     * ```
+     */
     async isEditable(locator: Locator, description: string, options?: IsEditableOptions): Promise<boolean> {
         return this.logger.action(
             `Checking if element "${description}" is editable`,
@@ -173,6 +389,20 @@ export class ElementActions {
         );
     }
 
+    /**
+     * Reports whether an element is disabled. The inverse of {@link isEnabled} —
+     * use whichever reads more naturally at the call site.
+     *
+     * @param locator - The target element.
+     * @param description - Human-readable name for logs/report.
+     * @param options - Playwright `locator.isDisabled()` options (`timeout`).
+     * @returns `true` if disabled, otherwise `false`.
+     *
+     * @example
+     * ```ts
+     * const locked = await this.elements.isDisabled(this.submitButton, 'submit button');
+     * ```
+     */
     async isDisabled(locator: Locator, description: string, options?: IsDisabledOptions): Promise<boolean> {
         return this.logger.action(
             `Checking if element "${description}" is disabled`,
