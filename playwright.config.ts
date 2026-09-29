@@ -25,7 +25,8 @@ export const test_credentials = {
   // Getter, not a plain property: playwright.config.ts is evaluated for every
   // `npx playwright test` invocation, so an eager requireEnv() here would break
   // commands that never touch the TOTP flow — e.g. the session-reuse spikes in
-  // AUTHENTICATION.md, which exist specifically to avoid needing this secret.
+  // tests/auth.save-session.ts and auth.verify-session.ts, which exist
+  // specifically to avoid needing this secret.
   // Deferring the check to first access keeps the fail-loud behavior for
   // whichever test actually reads it, without punishing every other run.
   get valid_otp_secret_1(): string {
