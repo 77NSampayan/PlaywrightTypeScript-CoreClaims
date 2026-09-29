@@ -53,6 +53,25 @@ export type WaitForURLOptions = Parameters<Page['waitForURL']>[1]
 // Options: reason, runBeforeUnload
 export type PageCloseOptions = Parameters<Page['close']>[0];
 
+// ─── page.setViewportSize() ───────────────────
+// Sets the viewport size.
+// Parameters: viewportSize { width, height } (index 0)
+export type ViewportSize = Parameters<Page['setViewportSize']>[0];
+
+// ─── page.waitForResponse() ───────────────────
+// Waits for a matching HTTP response.
+// Parameters: urlOrPredicate (index 0), options (index 1)
+// Options: signal, timeout
+export type WaitForResponseUrl = Parameters<Page['waitForResponse']>[0];
+export type WaitForResponseOptions = Parameters<Page['waitForResponse']>[1];
+
+// ─── page.waitForRequest() ────────────────────
+// Waits for a matching HTTP request.
+// Parameters: urlOrPredicate (index 0), options (index 1)
+// Options: signal, timeout
+export type WaitForRequestUrl = Parameters<Page['waitForRequest']>[0];
+export type WaitForRequestOptions = Parameters<Page['waitForRequest']>[1];
+
 // ─── expect(page) assertions ─────────────────────────────
 // Options types for LocatorAssertions matchers — index 0 for
 // options-only matchers, index 1 for matchers that take an

@@ -17,8 +17,19 @@ Scoped to **page/browser-level** concerns only — navigation and page-level ass
 | `reload(options?)` | Reloads and waits for `domcontentloaded` |
 | `goBack(options?)` / `goForward(options?)` | Browser history navigation |
 | `close(options?)` | Closes the page |
+| `bringToFront()` | Brings the page tab to the front (activates it) |
+| `setViewportSize(size)` | Sets the viewport to `{ width, height }` |
+| `getUrl()` | Returns the current `page.url()` |
+| `getContent()` | Returns the page HTML (`page.content()`); logs only the length, not the body |
+| `isClosed()` | Returns whether the page is closed |
+| `getViewportSize()` | Returns the current viewport `{ width, height }` or `null` |
+| `setDefaultTimeout(ms)` | Sets the page default timeout |
+| `setDefaultNavigationTimeout(ms)` | Sets the page default navigation timeout |
 | `waitForLoadState(state?, options?)` | Waits for a load state (`load` / `domcontentloaded` / `networkidle`) |
 | `waitForURL(url, options?)` | Waits for the page URL to match a pattern |
+| `waitForTimeout(ms)` | Hard-waits for `ms` (prefer web-first waits/assertions where possible) |
+| `waitForResponse(urlOrPredicate, options?)` | Waits for a matching HTTP response |
+| `waitForRequest(urlOrPredicate, options?)` | Waits for a matching HTTP request |
 | `toHaveURL(url, options?)` | Asserts `expect(page).toHaveURL(...)` |
 | `toHaveTitle(title, options?)` | Asserts `expect(page).toHaveTitle(...)` |
 
