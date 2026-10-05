@@ -68,10 +68,13 @@ jobs:
         env:
           PROJECT: ${{ inputs.project }}
           GREP: ${{ inputs.grep }}
+          # Left side = env var the config reads (do not rename); right side = your GitHub secret.
           BASE_URL: ${{ secrets.BASE_URL }}
-          VALID_USERNAME_1: ${{ secrets.VALID_USERNAME_1 }}
-          VALID_PASSWORD_1: ${{ secrets.VALID_PASSWORD_1 }}
-          VALID_OTP_SECRET_1: ${{ secrets.VALID_OTP_SECRET_1 }}
+          VALID_USERNAME_1: ${{ secrets.NEM_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.NEM_PASSWORD }}
+          # No OTP secret created yet. If a test reads the TOTP getter this stays empty and
+          # requireEnv throws — add an OTP secret and point this at it when that flow runs.
+          VALID_OTP_SECRET_1: ${{ secrets.NEM_OTP_SECRET }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
 
       # Upload the HTML report whether the run passed or failed, so failures are debuggable.
