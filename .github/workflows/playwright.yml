@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           # No `cache: npm` here: it requires a committed lockfile, which this repo
           # does not keep. Caching without one fails the run ("lock file is not found").
 
