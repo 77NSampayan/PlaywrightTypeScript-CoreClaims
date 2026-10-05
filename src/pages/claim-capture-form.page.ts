@@ -26,6 +26,28 @@ export type CoveredMemberInput = {
     membersPhilHealth?: string;
 };
 
+// Provider Editor has ~20 fields but only Provider Id/Provider Name carry
+// aria-invalid="true" — Provider Role already defaults to "BILLING" (ng-valid,
+// no asterisk-with-aria-invalid). The remaining optional fields below are the
+// plain text/number ones; the three Yes/No-style dropdowns (Taxable, Advance
+// approved, VAT registered), the Practice Type/Country dropdowns, and the
+// nested Provider Categories/Networks sub-lists are deliberately left out —
+// none are required (valid empty/"Not captured" defaults) and their real
+// option values haven't been confirmed against the live app yet.
+export type CoveredProviderInput = {
+    providerId: string;
+    providerName: string;
+    providerFlag?: string;
+    billingGracePeriod?: string;
+    loaEndorsement?: string;
+    vatPercentage?: string;
+    withholdingTax?: string;
+    discountTAT?: string;
+    preApprovedLimit?: string;
+    promptPaymentType?: string;
+    providerDiscountPercentage?: string;
+};
+
 export class ClaimCaptureFormPage extends BasePage {
 
     protected readonly pageHeading: Locator;
@@ -81,6 +103,28 @@ export class ClaimCaptureFormPage extends BasePage {
     protected readonly memberIsPatientCheckbox: Locator;
     protected readonly memberPhilHealthDropdown: Locator;
     protected readonly confirmAddMemberButton: Locator;
+
+    // "2. Claim Overview" — Covered Providers sub-section. Same editor-fieldset-
+    // plus-"Add" pattern and same scoping reasoning as Plan Details/Covered
+    // Members above. Only Provider Id/Provider Name are required — Provider
+    // Role already defaults to "BILLING" (ng-valid, no aria-invalid).
+    protected readonly coveredProvidersSection: Locator;
+    protected readonly addProviderButton: Locator;
+    protected readonly providerIdInput: Locator;
+    protected readonly providerNameInput: Locator;
+    protected readonly providerFlagInput: Locator;
+    protected readonly billingGracePeriodInput: Locator;
+    protected readonly loaEndorsementInput: Locator;
+    protected readonly vatPercentageInput: Locator;
+    protected readonly withholdingTaxInput: Locator;
+    protected readonly discountTATInput: Locator;
+    protected readonly preApprovedLimitInput: Locator;
+    // formgroupname="promptPaymentType" > formcontrolname="description" — scoped
+    // narrowly since "description" alone is reused elsewhere on the form (e.g.
+    // Claim Control's received-channel description).
+    protected readonly promptPaymentTypeInput: Locator;
+    protected readonly providerDiscountPercentageInput: Locator;
+    protected readonly confirmAddProviderButton: Locator;
 
     protected readonly nextButton: Locator;
     protected readonly submitClaimButton: Locator;
@@ -139,6 +183,21 @@ export class ClaimCaptureFormPage extends BasePage {
         this.memberIsPatientCheckbox = this.coveredMembersSection.locator('p-checkbox[formcontrolname="isPatient"] .p-checkbox-box');
         this.memberPhilHealthDropdown = this.coveredMembersSection.locator('p-dropdown[formcontrolname="isMembersPhilHealth"] [role="combobox"]');
         this.confirmAddMemberButton = this.coveredMembersSection.getByRole('button', { name: 'Add', exact: true });
+
+        this.coveredProvidersSection = this.page.locator('#claim-validation-claimHeader-billingTeam');
+        this.addProviderButton    = this.coveredProvidersSection.getByRole('button', { name: 'Add Provider', exact: true });
+        this.providerIdInput      = this.coveredProvidersSection.locator('input[formcontrolname="providerId"]');
+        this.providerNameInput    = this.coveredProvidersSection.locator('input[formcontrolname="providerName"]');
+        this.providerFlagInput    = this.coveredProvidersSection.locator('input[formcontrolname="providerFlag"]');
+        this.billingGracePeriodInput = this.coveredProvidersSection.locator('p-inputnumber[formcontrolname="billingGracePeriod"] input');
+        this.loaEndorsementInput  = this.coveredProvidersSection.locator('input[formcontrolname="loaEndorsement"]');
+        this.vatPercentageInput   = this.coveredProvidersSection.locator('p-inputnumber[formcontrolname="vatPercentage"] input');
+        this.withholdingTaxInput  = this.coveredProvidersSection.locator('p-inputnumber[formcontrolname="withholdingTax"] input');
+        this.discountTATInput     = this.coveredProvidersSection.locator('input[formcontrolname="discountTAT"]');
+        this.preApprovedLimitInput = this.coveredProvidersSection.locator('p-inputnumber[formcontrolname="preApprovedLimit"] input');
+        this.promptPaymentTypeInput = this.coveredProvidersSection.locator('fieldset[formgroupname="promptPaymentType"] input[formcontrolname="description"]');
+        this.providerDiscountPercentageInput = this.coveredProvidersSection.locator('p-inputnumber[formcontrolname="providerDiscountPercentage"] input');
+        this.confirmAddProviderButton = this.coveredProvidersSection.getByRole('button', { name: 'Add', exact: true });
 
         this.nextButton        = this.page.getByRole('button', { name: 'Next' });
         this.submitClaimButton = this.page.getByRole('button', { name: 'Submit Claim' });
@@ -295,6 +354,49 @@ export class ClaimCaptureFormPage extends BasePage {
         }
 
         await this.elements.click(this.confirmAddMemberButton, 'Confirm add member button');
+    };
+
+    // Clicking "Add Provider" reveals an inline "Provider Editor" fieldset.
+    // Only Provider Id/Provider Name are required — "Provider Role" already
+    // defaults to "BILLING" and is valid as-is. p-inputnumber fields use
+    // pressSequentially() rather than fill(), on the same reasoning as
+    // p-calendar: PrimeNG's InputNumber has its own per-keystroke formatting,
+    // so a bulk fill() risks not registering the same way the calendar didn't.
+    async addProvider(provider: CoveredProviderInput): Promise<void> {
+        await this.elements.click(this.addProviderButton, 'Add Provider button');
+
+        await this.elements.fill(this.providerIdInput, provider.providerId, 'Provider Id field');
+        await this.elements.fill(this.providerNameInput, provider.providerName, 'Provider Name field');
+
+        if (provider.providerFlag) {
+            await this.elements.fill(this.providerFlagInput, provider.providerFlag, 'Provider Flag field');
+        }
+        if (provider.billingGracePeriod) {
+            await this.elements.pressSequentially(this.billingGracePeriodInput, provider.billingGracePeriod, 'Billing Grace Period field');
+        }
+        if (provider.loaEndorsement) {
+            await this.elements.fill(this.loaEndorsementInput, provider.loaEndorsement, 'Loa Endorsement field');
+        }
+        if (provider.vatPercentage) {
+            await this.elements.pressSequentially(this.vatPercentageInput, provider.vatPercentage, 'VAT percentage field');
+        }
+        if (provider.withholdingTax) {
+            await this.elements.pressSequentially(this.withholdingTaxInput, provider.withholdingTax, 'Withholding tax field');
+        }
+        if (provider.discountTAT) {
+            await this.elements.fill(this.discountTATInput, provider.discountTAT, 'Discount TAT field');
+        }
+        if (provider.preApprovedLimit) {
+            await this.elements.pressSequentially(this.preApprovedLimitInput, provider.preApprovedLimit, 'Pre-approved limit field');
+        }
+        if (provider.promptPaymentType) {
+            await this.elements.fill(this.promptPaymentTypeInput, provider.promptPaymentType, 'Prompt payment type field');
+        }
+        if (provider.providerDiscountPercentage) {
+            await this.elements.pressSequentially(this.providerDiscountPercentageInput, provider.providerDiscountPercentage, 'Provider discount percentage field');
+        }
+
+        await this.elements.click(this.confirmAddProviderButton, 'Confirm add provider button');
     };
 
     async clickNext(): Promise<void> {

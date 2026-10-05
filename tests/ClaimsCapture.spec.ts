@@ -52,6 +52,23 @@ const SAMPLE_MEMBER = {
     markAsPatient: true, // only member being added — "exactly one patient per claim"
 };
 
+// Fixed sample data for the Covered Providers "Add Provider" row — Provider
+// Id/Provider Name are the only required fields (Provider Role already
+// defaults to "BILLING"). The rest are optional plain text/number fields.
+const SAMPLE_PROVIDER = {
+    providerId: 'PROV-0001',
+    providerName: 'Sample Provider Clinic',
+    providerFlag: 'N',
+    billingGracePeriod: '30',
+    loaEndorsement: 'LOA-0001',
+    vatPercentage: '12',
+    withholdingTax: '2',
+    discountTAT: '5',
+    preApprovedLimit: '10000',
+    promptPaymentType: 'Sample prompt payment type',
+    providerDiscountPercentage: '10',
+};
+
 test.beforeEach(async ({ loginPage, logger }) => {
     await logger.step('NAVIGATE TO LOGIN PAGE', async () => {
         await logger.info(`Opening URL: ${process.env.BASE_URL}`);
@@ -129,6 +146,10 @@ test.describe('Core Claims - Manual Claim Capture', () => {
 
         await logger.step('ADD_COVERED_MEMBER', async () => {
             await claimCaptureFormPage.addMember(SAMPLE_MEMBER);
+        });
+
+        await logger.step('ADD_COVERED_PROVIDER', async () => {
+            await claimCaptureFormPage.addProvider(SAMPLE_PROVIDER);
         });
 
         await logger.step('CLICK_NEXT_TO_DISCHARGE_SUMMARY', async () => {
