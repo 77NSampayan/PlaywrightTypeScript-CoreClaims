@@ -1,0 +1,82 @@
+name: Playwright Tests
+
+# Manual trigger only for now. CI env flips the config into its CI mode
+# (forbidOnly, retries: 2, workers: 1) via the CI variable GitHub sets automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Browser project to run
+        type: choice
+        default: chromium
+        options:
+          - chromium
+          - firefox
+          - webkit
+          - all
+      grep:
+        description: 'Only run tests whose title matches (Playwright -g). Leave blank to run all.'
+        type: string
+        default: ''
+
+jobs:
+  test:
+    name: ${{ inputs.project }}
+    # Self-hosted Windows runner (AVD-BASCL06-0). Targeted by label, not name.
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 30
+    # Windows PowerShell is always present on the runner; pwsh may not be.
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Install only the selected browser (or all three when "all" is chosen).
+      # No --with-deps: that flag installs Linux apt packages and is a no-op on Windows.
+      - name: Install Playwright browsers
+        run: |
+          if ($env:PROJECT -eq 'all') {
+            npx playwright install chromium firefox webkit
+          } else {
+            npx playwright install $env:PROJECT
+          }
+        env:
+          PROJECT: ${{ inputs.project }}
+
+      # The config runs headed + maximized (headless: false). On this Windows runner
+      # that works against the desktop session directly, so no virtual display is needed.
+      - name: Run Playwright tests
+        run: |
+          $pwArgs = @()
+          if ($env:PROJECT -ne 'all') { $pwArgs += "--project=$env:PROJECT" }
+          if ($env:GREP) { $pwArgs += '-g'; $pwArgs += $env:GREP }
+          npx playwright test @pwArgs
+        env:
+          PROJECT: ${{ inputs.project }}
+          GREP: ${{ inputs.grep }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.VALID_USERNAME_1 }}
+          VALID_PASSWORD_1: ${{ secrets.VALID_PASSWORD_1 }}
+          VALID_OTP_SECRET_1: ${{ secrets.VALID_OTP_SECRET_1 }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+
+      # Upload the HTML report whether the run passed or failed, so failures are debuggable.
+      - name: Upload Playwright HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ inputs.project }}
+          path: playwright-report/
+          retention-days: 14
