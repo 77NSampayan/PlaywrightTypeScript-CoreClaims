@@ -38,10 +38,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: npm
+          # No `cache: npm` here: it requires a committed lockfile, which this repo
+          # does not keep. Caching without one fails the run ("lock file is not found").
 
       - name: Install dependencies
-        run: npm ci
+        # npm install (not npm ci) because there is no package-lock.json to install from.
+        run: npm install
 
       # Install only the selected browser (or all three when "all" is chosen).
       # No --with-deps: that flag installs Linux apt packages and is a no-op on Windows.
