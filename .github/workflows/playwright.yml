@@ -96,4 +96,77 @@ jobs:
         with:
           name: playwright-report-${{ inputs.project }}
           path: playwright-report/
-          retention-days: 14
+
+      # Build the Allure report with all widgets enabled. Runs on failure too (!cancelled),
+      # so a failed suite still produces a report. Requires the Allure CLI + a JRE on the
+      # runner. Needs no committed lockfile and no browser.
+      #
+      # Trends/history: checkout wipes the workspace each run, so the previous report's
+      # history/ is stashed OUTSIDE the repo (under the runner user profile, keyed per
+      # project) and copied back into allure-results/ before generating.
+      - name: Generate Allure report
+        if: ${{ !cancelled() }}
+        run: |
+          if (-not (Test-Path 'allure-results')) {
+            Write-Host 'No allure-results produced (no tests ran?) - skipping Allure report.'
+            exit 0
+          }
+
+          # Persistent, per-project history store that survives checkout's git clean.
+          $histStore = Join-Path $env:USERPROFILE "allure-history\PlaywrightTS-CoreClaims\$env:PROJECT"
+
+          # Carry the previous run's history into this run's results (enables trends).
+          if (Test-Path "$histStore\*") {
+            New-Item -ItemType Directory -Force -Path 'allure-results\history' | Out-Null
+            Copy-Item "$histStore\*" 'allure-results\history' -Recurse -Force
+          }
+
+          # Environment widget (non-secret metadata only - never credentials).
+          @"
+          BASE_URL=$env:BASE_URL
+          Project=$env:PROJECT
+          Branch=$env:GIT_BRANCH
+          Commit=$env:GIT_SHA
+          OS=Windows (self-hosted AVD-BASCL06-0)
+          "@ | Out-File -FilePath 'allure-results\environment.properties' -Encoding ascii
+
+          # Executor widget: names the build and links trend points back to this run.
+          @"
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "reportName": "Playwright Tests - $env:PROJECT",
+            "buildName": "#$env:BUILD_NUMBER $env:PROJECT",
+            "buildOrder": $env:BUILD_NUMBER,
+            "buildUrl": "$env:BUILD_URL",
+            "url": "$env:REPO_URL"
+          }
+          "@ | Out-File -FilePath 'allure-results\executor.json' -Encoding ascii
+
+          # Prefer the globally installed CLI; fall back to the allure-commandline dep.
+          if (Get-Command allure -ErrorAction SilentlyContinue) {
+            allure generate allure-results --clean -o allure-report
+          } else {
+            npx allure generate allure-results --clean -o allure-report
+          }
+
+          # Stash this run's freshly generated history for the next run's trends.
+          if (Test-Path 'allure-report\history') {
+            New-Item -ItemType Directory -Force -Path $histStore | Out-Null
+            Copy-Item 'allure-report\history\*' $histStore -Recurse -Force
+          }
+        env:
+          PROJECT: ${{ inputs.project }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ inputs.project }}
+          path: allure-report/
