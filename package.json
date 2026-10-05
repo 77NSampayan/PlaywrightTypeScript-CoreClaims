@@ -22,6 +22,7 @@
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "mssql": "^12.7.2",
     "otpauth": "^9.3.6"
   }
