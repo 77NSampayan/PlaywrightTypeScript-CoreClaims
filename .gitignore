@@ -21,7 +21,11 @@ playwright-report*.zip
 
 # Generated OPEML claim-upload test data (test-data/opeml) and any reference
 # OPEML*.xlsx dropped at the repo root — regenerate via
-# scripts/generate-opeml-batches.py rather than committing; reference copies
+# scripts/generate-opeml-batches.ts rather than committing; reference copies
 # may carry real member data and must never be pushed.
 /test-data/
 /OPEML*.xlsx
+
+# Local run-state for the OPEML generator (filename counter/date, last
+# Transaction ID suffix) — machine-specific, not shared.
+/scripts/.opeml-sequence-state.json
