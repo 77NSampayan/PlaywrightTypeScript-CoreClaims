@@ -8,12 +8,9 @@ on:
       project:
         description: Project to run (db = Database.spec.ts, no browser)
         type: choice
-        default: db
+        default: chrome
         options:
           - db
-          - msedge
-          - firefox
-          - webkit
           - chrome
           - all
       grep:
@@ -55,9 +52,6 @@ jobs:
         run: |
           switch ($env:PROJECT) {
             'db'      { Write-Host 'db project uses no browser - skipping browser install.' }
-            'firefox' { npx playwright install firefox }
-            'webkit'  { npx playwright install webkit }
-            'msedge'  { Write-Host 'msedge uses the system Microsoft Edge on the runner - skipping install.' }
             'chrome'  { Write-Host 'chrome uses the system Google Chrome on the runner - skipping install.' }
             'all'     { npx playwright install firefox webkit }
             default   { npx playwright install $env:PROJECT }
