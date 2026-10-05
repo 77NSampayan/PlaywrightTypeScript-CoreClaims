@@ -1,18 +1,20 @@
 name: Playwright Tests
 
 # Manual trigger only for now. CI env flips the config into its CI mode
-# (forbidOnly, retries: 2, workers: 1) via the CI variable GitHub sets automatically.
+# (forbidOnly, retries: 2, workers: 1, headless) via the CI variable GitHub sets automatically.
 on:
   workflow_dispatch:
     inputs:
       project:
-        description: Browser project to run
+        description: Project to run (db = Database.spec.ts, no browser)
         type: choice
-        default: chromium
+        default: db
         options:
-          - chromium
+          - db
+          - msedge
           - firefox
           - webkit
+          - chrome
           - all
       grep:
         description: 'Only run tests whose title matches (Playwright -g). Leave blank to run all.'
@@ -45,20 +47,26 @@ jobs:
         # npm install (not npm ci) because there is no package-lock.json to install from.
         run: npm install
 
-      # Install only the selected browser (or all three when "all" is chosen).
-      # No --with-deps: that flag installs Linux apt packages and is a no-op on Windows.
-      - name: Install Playwright browsers
+      # Install only what the selected project needs:
+      #  - db      : no browser at all
+      #  - firefox / webkit : Playwright-managed engines, must be installed
+      #  - msedge / chrome  : branded browsers, use the ones already on the runner
+      - name: Install Playwright browser
         run: |
-          if ($env:PROJECT -eq 'all') {
-            npx playwright install chromium firefox webkit
-          } else {
-            npx playwright install $env:PROJECT
+          switch ($env:PROJECT) {
+            'db'      { Write-Host 'db project uses no browser - skipping browser install.' }
+            'firefox' { npx playwright install firefox }
+            'webkit'  { npx playwright install webkit }
+            'msedge'  { Write-Host 'msedge uses the system Microsoft Edge on the runner - skipping install.' }
+            'chrome'  { Write-Host 'chrome uses the system Google Chrome on the runner - skipping install.' }
+            'all'     { npx playwright install firefox webkit }
+            default   { npx playwright install $env:PROJECT }
           }
         env:
           PROJECT: ${{ inputs.project }}
 
-      # The config runs headed + maximized (headless: false). On this Windows runner
-      # that works against the desktop session directly, so no virtual display is needed.
+      # headless is forced on under CI by playwright.config.ts (no display needed),
+      # so nothing extra is required for the browser projects here.
       - name: Run Playwright tests
         run: |
           $pwArgs = @()
@@ -72,9 +80,19 @@ jobs:
           BASE_URL: ${{ secrets.BASE_URL }}
           VALID_USERNAME_1: ${{ secrets.NEM_EMAIL }}
           VALID_PASSWORD_1: ${{ secrets.NEM_PASSWORD }}
-          # No OTP secret created yet. If a test reads the TOTP getter this stays empty and
-          # requireEnv throws — add an OTP secret and point this at it when that flow runs.
           VALID_OTP_SECRET_1: ${{ secrets.NEM_OTP_SECRET }}
+          # DB-backed specs (db project). data_enrichment secrets exist; the Membership
+          # test also needs MEMBERSHIP_DB_* — create those secrets or it fails at connect.
+          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          MEMBERSHIP_DB_SERVER: ${{ secrets.MEMBERSHIP_DB_SERVER }}
+          MEMBERSHIP_DB_NAME: ${{ secrets.MEMBERSHIP_DB_NAME }}
+          MEMBERSHIP_DB_USER: ${{ secrets.MEMBERSHIP_DB_USER }}
+          MEMBERSHIP_DB_PASSWORD: ${{ secrets.MEMBERSHIP_DB_PASSWORD }}
+          MEMBERSHIP_DB_PORT: ${{ secrets.MEMBERSHIP_DB_PORT }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
 
       # Upload the HTML report whether the run passed or failed, so failures are debuggable.
