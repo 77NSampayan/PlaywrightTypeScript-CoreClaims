@@ -39,6 +39,8 @@ test.describe('SQLite Wasm', () => {
                 'seeded claims rows'
             );
 
+            await logger.info(`SQLite Wasm query returned ${rows.length} rows: ${JSON.stringify(rows)}`);
+
             await assert.toEqual(rows.length, 3, 'seeded claims row count');
             await assert.toEqual(rows[0]?.claim_number, 'CLM-1001', 'first claim number');
             await assert.toEqual(rows[0]?.status, 'Approved', 'first claim status');
