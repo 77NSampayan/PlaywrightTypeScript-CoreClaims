@@ -7,6 +7,7 @@ import { GenericAssertions } from '@base/GenericAssertions.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
 import { LandingPage } from '@pages/landing.page.ts';
+import { AzureStorageSasPage } from '@pages/azure-storage-sas.page.ts';
 
 
 export type TestFixtures = {
@@ -21,6 +22,7 @@ export type TestFixtures = {
     membershipDbConnection: DbConnection;
     sqliteConnection: SqliteWasmConnection;
     landingPage: LandingPage;
+    azureStorageSasPage: AzureStorageSasPage;
 };
 
 export type WorkerFixtures = {
@@ -128,7 +130,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     },
    landingPage: async ({ page }, use) => {
         await use(new LandingPage(page));
-    }
+    },
+
+    azureStorageSasPage: async ({ page }, use) => {
+        await use(new AzureStorageSasPage(page));
+    },
 });
 
 export { expect } from '@playwright/test'

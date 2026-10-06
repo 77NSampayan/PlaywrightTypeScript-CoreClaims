@@ -78,6 +78,17 @@ export const db_config = dbConfigFromEnv('DATA_ENRICHMENT_DB');
 // Membership database — separate server/credentials from db_config above.
 export const membership_db_config = dbConfigFromEnv('MEMBERSHIP_DB');
 
+// Azure Blob Storage SAS URL for the claims intake pipeline (writes to a real
+// production container) — lazy getter, same reasoning as db_config above:
+// only IntakeUpload.spec.ts touches this, so an eager requireEnv() here would
+// break every run that doesn't. This is a live, time-limited WRITE credential
+// (the SAS's own `se=` param expires it) — never log it, never commit it.
+export const intake_blob_config = {
+  get sasUrl(): string {
+    return requireEnv('INTAKE_BLOB_SAS_URL');
+  },
+};
+
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
@@ -137,9 +148,20 @@ export default defineConfig({
       testMatch: /Database\.spec\.ts/,
     },
 
+    // Same reasoning as the `db` project above: these specs each drive a
+    // real browser login, but their actual upload is a plain HTTP call
+    // (Azure Blob), not Core Claims page objects. Kept as their own project
+    // rather than folded into `db` since it's a different kind of external
+    // dependency (a live, time-limited SAS credential against a real
+    // production endpoint, not a database connection).
+    {
+      name: 'api',
+      testMatch: /(IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    },
+
     {
       name: 'msedge',
-      testIgnore: /Database\.spec\.ts/,
+      testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
@@ -147,23 +169,23 @@ export default defineConfig({
       },
     },
 
-    {
-      name: 'firefox',
-      testIgnore: /Database\.spec\.ts/,
-      use: { ...devices['Desktop Firefox'] },
-    },
+    // {
+    //   name: 'firefox',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Firefox'] },
+    // },
 
-    {
-      name: 'webkit',
-      testIgnore: /Database\.spec\.ts/,
-      use: { ...devices['Desktop Safari'] },
-    },
+    // {
+    //   name: 'webkit',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Safari'] },
+    // },
 
-    {
-      name: 'chrome',
-      testIgnore: /Database\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    },
+    // {
+    //   name: 'chrome',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    // },
 
     /* Test against mobile viewports. */
     // {

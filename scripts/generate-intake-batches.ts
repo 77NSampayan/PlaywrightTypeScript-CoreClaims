@@ -9,9 +9,9 @@
 //
 // Filenames are OPEML<today's date, YYYYMMDD><5-digit running counter>T —
 // the counter continues across runs on the same day (persisted in
-// .opeml-sequence-state.json, next to this script) and resets to 1 the
+// .intake-sequence-state.json, next to this script) and resets to 1 the
 // first time the script runs on a new day. Deleting generated files under
-// test-data/opeml/ does not affect this — the counter lives in the state
+// test-data/intake/ does not affect this — the counter lives in the state
 // file, not the output directory.
 //
 // Schema, column widths, and the fixed test-environment values (Source
@@ -28,25 +28,25 @@
 // is the actual thing under test here, not patient PII.
 //
 // Usage:
-//     node scripts/generate-opeml-batches.ts
+//     node scripts/generate-intake-batches.ts
 //
 // Output (example, run on 2026-10-05, first run of the day):
-//     test-data/opeml/OPEML2026100500001T.xlsx  (DPS,      negative)
-//     test-data/opeml/OPEML2026100500002T.xlsx  (ComCheck, negative)
-//     test-data/opeml/OPEML2026100500003T.xlsx  (UB,       negative)
-//     test-data/opeml/OPEML2026100500004T.xlsx  (DPS,      positive)
-//     test-data/opeml/OPEML2026100500005T.xlsx  (ComCheck, positive)
-//     test-data/opeml/OPEML2026100500006T.xlsx  (UB,       positive)
+//     test-data/intake/OPEML2026100500001T.xlsx  (DPS,      negative)
+//     test-data/intake/OPEML2026100500002T.xlsx  (ComCheck, negative)
+//     test-data/intake/OPEML2026100500003T.xlsx  (UB,       negative)
+//     test-data/intake/OPEML2026100500004T.xlsx  (DPS,      positive)
+//     test-data/intake/OPEML2026100500005T.xlsx  (ComCheck, positive)
+//     test-data/intake/OPEML2026100500006T.xlsx  (UB,       positive)
 
 import ExcelJS from 'exceljs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
-const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'opeml');
-const STATE_FILE = path.join(__dirname, '.opeml-sequence-state.json');
+const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
+const STATE_FILE = path.join(__dirname, '.intake-sequence-state.json');
 
 const HEADERS = [
     'Member Code', 'Name', 'Company', 'Diagnosis', 'Dx Code', 'Doctor',
@@ -55,13 +55,13 @@ const HEADERS = [
     'Procedure', 'Received Date', 'Care Setting', 'Claim Sub Type', 'Action Memo',
 ];
 
-type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
+export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
 
 // Doctor name must match the live system's physician master data exactly,
 // including the trailing space on two of these three (present in the
 // reference files too) — the app looks the doctor up by this string, so a
 // "cleaned up" name would silently break the payment-mode routing.
-const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string> = {
+export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string> = {
     DPS: 'TOMAS ANTONIO',
     COMCHECK: 'JAN ROSLYN T. EMPINADO ',
     UB: 'MA. TERESA VICTORIA LUCIA DIMAGIBA ',
@@ -101,7 +101,7 @@ function nextTransactionId(): string {
 
 // Persisted across runs so the filename counter keeps advancing instead of
 // restarting from the reference files every time. Lives next to the script,
-// not under test-data/opeml/, so deleting generated output doesn't reset it.
+// not under test-data/intake/, so deleting generated output doesn't reset it.
 type SequenceState = {
     /** YYYYMMDD of the last run — the counter resets to 1 the first run on a new date. */
     date: string;
@@ -141,33 +141,33 @@ function buildFilename(date: string, counter: number): string {
 
 type Patient = { memberCode: number; name: string };
 
-// "MEMBERS WITH ACTIVE POLICY IN STAGING" fixture accounts (same family,
-// account 01011999-000025) — confirmed by the test data owner to be
-// synthetic QA fixtures, not real customers, so safe to use directly. These
-// are also the only Member Codes the staging upload actually validates
-// against, which a made-up code would not pass.
-//
-// Negative batch reuses the same two dependents (33725678/33725679) the
-// original reference files (428T/429T/430T) already used. The positive
-// batch brings in the family's principal member (33725677) as the
-// genuinely "different" patient — only 3 confirmed-valid fixtures exist in
-// total, so its second row reuses one dependent rather than inventing an
-// unconfirmed code.
-const NEGATIVE_PATIENTS: Patient[] = [
+// "MEMBERS WITH ACTIVE POLICY IN STAGING" fixture pool — confirmed by the
+// test data owner to be synthetic QA accounts, not real customers, so safe
+// to use directly. These are also the only Member Codes the staging upload
+// actually validates against, which a made-up code would not pass.
+const PATIENT_POOL: Patient[] = [
+    { memberCode: 35683384, name: 'MA. MYLENE C SUBIDO' },
+    { memberCode: 35683407, name: 'EMMA B CO' },
+    { memberCode: 35757812, name: 'AMABELLE GAY P JIMENEZ' },
     { memberCode: 33725678, name: 'NIEVA DINGLASAN' },
     { memberCode: 33725679, name: 'ROMEO DINGLASAN' },
-];
-const POSITIVE_PATIENTS: Patient[] = [
     { memberCode: 33725677, name: 'ROVIE MAIDA A DINGLASAN' },
-    { memberCode: 33725678, name: 'NIEVA DINGLASAN' },
 ];
 
-// Generic clinical reference codes (not patient-identifying) — reused from
-// the reference files for the positive/complete batch.
-const SAMPLE_DIAGNOSES = [
-    { diagnosis: 'Acute upper respiratory infection', dxCode: 'Dx2473' },
-    { diagnosis: 'Eczema', dxCode: 'Dx3632' },
-];
+// Picks `count` distinct patients at random from the pool, excluding any
+// already handed to another batch this run — so the positive batch doesn't
+// coincidentally reuse a negative-batch patient, the way the old fixed
+// 3-patient setup sometimes had to.
+function pickRandomPatients(count: number, exclude: Patient[] = []): Patient[] {
+    const excludedCodes = new Set(exclude.map((p) => p.memberCode));
+    const available = PATIENT_POOL.filter((p) => !excludedCodes.has(p.memberCode));
+    const shuffled = [...available].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count);
+}
+
+// Only this one confirmed diagnosis/Dx Code pair is used — not invented,
+// and not alternated with any other diagnosis.
+const SAMPLE_DIAGNOSIS = { diagnosis: 'Acute upper respiratory infection', dxCode: 'Dx2473' };
 
 type BatchEntry = { filename: string; paymentMode: PaymentMode };
 
@@ -195,8 +195,8 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
     const doctor = PAYMENT_MODE_DOCTORS[paymentMode];
 
     patients.forEach((patient, i) => {
-        const diagnosis = negative ? '' : SAMPLE_DIAGNOSES[i % SAMPLE_DIAGNOSES.length]!.diagnosis;
-        const dxCode = negative ? '' : SAMPLE_DIAGNOSES[i % SAMPLE_DIAGNOSES.length]!.dxCode;
+        const diagnosis = negative ? '' : SAMPLE_DIAGNOSIS.diagnosis;
+        const dxCode = negative ? '' : SAMPLE_DIAGNOSIS.dxCode;
         const actionMemo = negative ? 'Y' : 'N';
 
         sheet.addRow([
@@ -235,7 +235,10 @@ async function writeBatch(batch: BatchEntry[], patients: Patient[], negative: bo
     }
 }
 
-async function main(): Promise<void> {
+// Exported so tests/IntakeUpload.spec.ts can call it directly (generate a
+// sample file on demand when test-data/intake/ is empty) instead of
+// requiring a separate manual `node scripts/generate-intake-batches.ts` step.
+export async function generateIntakeBatches(): Promise<void> {
     await mkdir(OUTPUT_DIR, { recursive: true });
 
     const state = await loadState();
@@ -261,8 +264,11 @@ async function main(): Promise<void> {
         return { filename: buildFilename(today, counter), paymentMode };
     });
 
-    await writeBatch(negativeBatch, NEGATIVE_PATIENTS, true, visitDate, receivedDate);
-    await writeBatch(positiveBatch, POSITIVE_PATIENTS, false, visitDate, receivedDate);
+    const negativePatients = pickRandomPatients(2);
+    const positivePatients = pickRandomPatients(2, negativePatients);
+
+    await writeBatch(negativeBatch, negativePatients, true, visitDate, receivedDate);
+    await writeBatch(positiveBatch, positivePatients, false, visitDate, receivedDate);
 
     await saveState({
         date: today,
@@ -270,4 +276,10 @@ async function main(): Promise<void> {
     });
 }
 
-await main();
+// Runs automatically only when invoked directly (`node scripts/generate-intake-batches.ts`),
+// not when imported as a module (e.g. by tests/IntakeUpload.spec.ts). process.argv[1] is
+// undefined in some non-direct-invocation contexts (e.g. `node -e`) — treat that the same
+// as "not a direct run" rather than letting pathToFileURL throw on it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    await generateIntakeBatches();
+}
