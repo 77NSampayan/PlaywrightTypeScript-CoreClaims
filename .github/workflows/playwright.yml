@@ -175,12 +175,10 @@ jobs:
           $env:PATH = (Join-Path $javaHome 'bin') + ';' + $env:PATH
           Write-Host "Using JAVA_HOME=$javaHome"
 
-          # Prefer the globally installed CLI; fall back to the allure-commandline dep.
-          if (Get-Command allure -ErrorAction SilentlyContinue) {
-            allure generate allure-results --clean -o allure-report
-          } else {
-            npx allure generate allure-results --clean -o allure-report
-          }
+          # Use the pinned allure-commandline (Allure 2) from node_modules, NOT any
+          # global `allure` on the runner: that one is Allure 3, whose CLI dropped
+          # `--clean` and the positional results dir, so this command fails to parse.
+          npx allure generate allure-results --clean -o allure-report
 
           # Stash this run's freshly generated history for the next run's trends.
           if (Test-Path 'allure-report\history') {
