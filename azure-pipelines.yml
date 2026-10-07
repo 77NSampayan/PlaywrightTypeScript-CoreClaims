@@ -13,7 +13,7 @@
 #              (BASE_URL, NEM_EMAIL, NEM_PASSWORD, NEM_OTP_SECRET, the DB_* values,
 #              and optionally LOG_LEVEL). Mark the credential ones as secret.
 variables:
-  - group: PlaywrightCoreClaims          # <-- REPLACE with your variable group name
+  - group: CoreClaims-AutomationDeps          # <-- REPLACE with your variable group name
   # Force playwright.config.ts into CI mode (headless, forbidOnly, retries).
   - name: CI
     value: 'true'
