@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 //  environment.config.ts
 //  Execution-environment configuration for the
-//  authentication strategy — see AUTHENTICATION.md.
+//  session-reuse authentication spike
+//  (see tests/auth.save-session.ts).
 // ─────────────────────────────────────────────
 
 import path from 'path';

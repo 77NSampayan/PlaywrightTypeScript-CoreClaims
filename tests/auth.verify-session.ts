@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 //  auth.verify-session.ts
-//  SPIKE — step 2 of the session-reuse question in AUTHENTICATION.md.
+//  SPIKE — step 2 of the session-reuse question (step 1 is auth.save-session.ts).
 //
 //  Loads the session saved by auth.save-session.ts into a fresh browser
 //  context and checks whether it still lands authenticated. This is the
@@ -13,10 +13,9 @@
 //    bash:        VERIFY_SESSION=1 npx playwright test tests/auth.verify-session.ts --project=chromium
 //
 //  This is a SMOKE CHECK, not a real assertion. It proves "not bounced back
-//  to a login screen", which is weaker than "the app authorised me" — see the
-//  false-confidence note in AUTHENTICATION.md. For a go/no-go spike, watching
-//  the headed browser is the real verification; these assertions just stop it
-//  passing silently when it clearly failed.
+//  to a login screen", which is weaker than "the app authorised me". For a
+//  go/no-go spike, watching the headed browser is the real verification; these
+//  assertions just stop it passing silently when it clearly failed.
 // ─────────────────────────────────────────────
 
 import { existsSync } from 'fs';
