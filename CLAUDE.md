@@ -11,11 +11,11 @@ Playwright + TypeScript UI test automation for the "Amplify Health Product Porta
 There are no `npm` scripts defined in package.json — use the Playwright CLI directly via `npx`.
 
 ```bash
-npx playwright test                          # run the full suite (all 3 browser projects)
+npx playwright test                          # run the full suite (db, msedge, firefox, webkit projects)
 npx playwright test tests/Login.spec.ts      # run a single spec file
 npx playwright test -g "Successful login"    # run a single test by title
-npx playwright test --project=chromium       # run against one browser project only
-npx playwright test --headed                 # force headed (headless is already false by default, see below)
+npx playwright test --project=msedge         # run against one browser project only
+npx playwright test --headed                 # force headed locally (already the default outside CI, see below)
 npx playwright show-report                   # open the last HTML report
 npx playwright codegen <url>                 # record a new locator/flow
 ```
@@ -39,9 +39,12 @@ npx tsc --noEmit
 
 Config is loaded from `.env` at the repo root via `dotenv` in [playwright.config.ts](playwright.config.ts). Required variables:
 
-- `BASE_URL` — base URL used by `page.goto()` / `baseURL`
-- `VALID_USERNAME_1`, `VALID_PASSWORD_1` — test credentials for the Microsoft SSO login flow (`requireEnv()` throws at config-load time if either is missing)
+- `BASE_URL`, `VALID_USERNAME_1`, `VALID_PASSWORD_1` — always required; `requireEnv()` throws at config-load time (before any test runs) if any is missing
+- `VALID_OTP_SECRET_1` — only required by the SSO login spec's MFA step; checked lazily (a getter), the first time something actually reads it — see the comment on `test_credentials` in [playwright.config.ts](playwright.config.ts)
+- `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT`, `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` — only required by DB-backed specs (`dbConnection`/`membershipDbConnection`); same lazy-getter treatment, built via the shared `dbConfigFromEnv(prefix)` helper
 - `LOG_LEVEL` — optional, controls `SmartLogger` verbosity (`DEBUG` | `INFO` | `STEP` | `WARN` | `ERROR`, defaults to `INFO`)
+
+Full table with notes: [README.md](README.md) § Setup.
 
 **Two files, one tracked.** [.env.example](.env.example) holds placeholders and *is* committed; `.env` holds real values and is **never** committed (it is gitignored). Setup is `cp .env.example .env`, then fill it in — see [README.md](README.md) § Setup. When adding a variable, add it to `.env.example` with a placeholder in the same change.
 
@@ -49,7 +52,7 @@ Never commit real values for these or print credential values in logs/output. Pa
 
 This matters beyond the console: a `fill()` start message is reused as the `test.step()` name, so an unmasked value is published to the HTML report and the trace as well. For the same reason, never interpolate a credential or account identifier into a `logger.step()` label. A `/password|secret|token|creditcard/i` description sniff is retained as a backstop, but do not rely on it — no honest name for an identity field matches a keyword list.
 
-Browsers run **headed** by default (`headless: false` in [playwright.config.ts](playwright.config.ts)) and maximized (`--start-maximized`), with `viewport: null` on the chromium project to use full window size instead of Playwright's default 1280x720.
+Browsers run **headed** and maximized (`--start-maximized`) locally by design; `headless` is `!!process.env.CI` in [playwright.config.ts](playwright.config.ts), so it flips to headless automatically on a CI runner (no display) without needing a separate config. `viewport: null` is set on the `msedge` project to use full window size instead of Playwright's default 1280x720.
 
 ## Architecture
 
@@ -72,13 +75,17 @@ Layered Page Object Model with structured logging built into the base layer, usi
 - On test failure, `endTest(false)` dumps the last 50 buffered log lines (`BUFFER_SIZE`) regardless of `LOG_LEVEL`, so failure context is visible even when running quiet.
 - `LogFormatter.util.ts` owns all ANSI coloring/timestamp formatting — keep formatting changes there rather than inline in `SmartLogger`.
 
-**Fixtures** ([src/fixtures/base.fixture.ts](src/fixtures/base.fixture.ts)): extends Playwright's `test` with `logger` (auto test-context banner start/end per test) and page-object fixtures (`loginPage`, `microsoftLoginPage`). A worker-scoped `configInfo` fixture (`auto: true`) logs browser/env config once per worker at suite start — no need to declare it in tests. New page objects should be added as fixtures here, not constructed inline in specs. Import `test`/`expect` for specs from this file (`@fixtures/base.fixture.ts`), not directly from `@playwright/test`.
+**DB access** ([src/utils/db.util.ts](src/utils/db.util.ts)): `DbConnection` (MSSQL, via `mssql`) and `SqliteWasmConnection` (in-process `@sqlite.org/sqlite-wasm`, no external server). Both route every query through `logger.action(...)` like every other framework primitive, so a query shows up as a step in the console and the HTML report/trace viewer. `DbConnection` takes a `DbConfig` in its constructor rather than reading one hardcoded global — see `db_config`/`membership_db_config` in [playwright.config.ts](playwright.config.ts) for the two configs currently wired up, each built from a shared `dbConfigFromEnv(prefix)` helper. `query()` returns just the rows (`T[]`).
+
+**Fixtures** ([src/fixtures/base.fixture.ts](src/fixtures/base.fixture.ts)): extends Playwright's `test` with `logger` (auto test-context banner start/end per test), `assert` (a shared `GenericAssertions` instance for specs with no page object, e.g. `Database.spec.ts`), and page-object fixtures (`loginPage`, `microsoftLoginPage`, `landingPage`). DB-backed specs get `dbConnection`/`membershipDbConnection`/`sqliteConnection`, each opened before the test and closed after. A worker-scoped `configInfo` fixture (`auto: true`) logs the active project name and env config once per worker at suite start — no need to declare it in tests; it deliberately does not depend on `{ browser }`, since that would launch one per worker (including for the browser-less `db` project) just to print a banner. New page objects should be added as fixtures here, not constructed inline in specs. Import `test`/`expect` for specs from this file (`@fixtures/base.fixture.ts`), not directly from `@playwright/test`.
 
 **Constants** ([src/constants/](src/constants/)):
 - [endpoint.config.ts](src/constants/endpoint.config.ts) — single source of truth for UI route paths (`uiEndPoints`); never hardcode paths in tests/page objects.
 - [page-types.config.ts](src/constants/page-types.config.ts) / [locator-types.config.ts](src/constants/locator-types.config.ts) — option types derived via `Parameters<...>` directly from the installed Playwright `Page`/`Locator`/matcher APIs, so they stay in sync with the Playwright version automatically. Follow this same derivation pattern when adding option types for new wrapped methods, rather than hand-writing option interfaces.
 
 **Credentials**: `test_credentials` is defined and exported from [playwright.config.ts](playwright.config.ts) (not a separate constants file) and imported into specs via `@root/playwright.config.ts`.
+
+**Projects**: `db` (matches `Database.spec.ts` only — no browser, no `testIgnore`d elsewhere) and the browser projects `msedge`/`firefox`/`webkit`, each with `testIgnore: /Database\.spec\.ts/` so DB specs don't also run three times over. `headless` is forced on when `process.env.CI` is set (no display on a CI runner); headed and maximized locally by design.
 
 ## Adding a new page/flow
 

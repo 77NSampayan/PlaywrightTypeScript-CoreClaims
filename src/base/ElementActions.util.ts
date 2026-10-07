@@ -9,6 +9,8 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
+    GetValueOptions,
+    PressSequentiallyOptions,
     IsEnabledOptions,
     IsEditableOptions,
     IsDisabledOptions,
@@ -111,18 +113,20 @@ export class ElementActions {
     }
 
     /**
-     * Checks a checkbox or radio button. No-op if it is already checked.
-     *
-     * @param locator - The checkbox/radio element.
-     * @param description - Human-readable name for logs/report.
-     * @param options - Playwright `locator.check()` options (`force`, `position`, …).
-     * @returns Resolves once the element is checked.
-     *
-     * @example
-     * ```ts
-     * await this.elements.check(this.termsCheckbox, 'accept terms checkbox');
-     * ```
+     * Types character by character instead of setting the value in bulk —
+     * needed for components (e.g. PrimeNG's p-calendar) that parse input per
+     * keystroke and never pick up a fill()-set value. Prefer fill() by default;
+     * reach for this only when fill() demonstrably doesn't register.
      */
+    async pressSequentially(locator: Locator, value: string, description: string, options?: PressSequentiallyOptions): Promise<void> {
+        await this.logger.action(
+            `Typing "${value}" into element "${description}"`,
+            () => locator.pressSequentially(value, options),
+            `Successfully typed text into element "${description}"`,
+            `Failed to type text into element "${description}"`
+        );
+    }
+
     async check(locator: Locator, description: string, options?: CheckOptions): Promise<void> {
         await this.logger.action(
             `Checking element "${description}"`,
@@ -209,21 +213,20 @@ export class ElementActions {
         );
     }
 
-    /**
-     * Waits until an element is visible. **Throws** (failing the test) if it does
-     * not become visible within the timeout — use this for elements that *must*
-     * appear. For genuinely optional UI, use {@link waitForVisibleSoft} instead.
-     *
-     * @param locator - The target element.
-     * @param description - Human-readable name for logs/report.
-     * @param options - Playwright `locator.waitFor()` options (`timeout`); `state` is forced to `'visible'`.
-     * @returns Resolves once the element is visible.
-     *
-     * @example
-     * ```ts
-     * await this.elements.waitForVisible(this.dashboardHeader, 'dashboard header');
-     * ```
-     */
+    // An <input>/<textarea>/<select>'s current value is a DOM property, not
+    // rendered text — textContent() always returns '' for these, hence a
+    // separate method. Like getText(), the log lines never include the
+    // extracted value itself, only the description — safe to use on
+    // sensitive fields (e.g. a live SAS token output) without a mask option.
+    async getValue(locator: Locator, description: string, options?: GetValueOptions): Promise<string> {
+        return this.logger.action(
+            `Reading value of "${description}"`,
+            () => locator.inputValue(options),
+            `Successfully read value of "${description}"`,
+            `Failed to read value of "${description}"`
+        );
+    }
+
     async waitForVisible(locator: Locator, description: string, options?: WaitForOptions): Promise<void> {
         await this.logger.action(
             `Waiting for element "${description}" to be visible`,

@@ -1,0 +1,198 @@
+# Playwright Tests (Azure DevOps)
+#
+# ADO translation of .github/workflows/playwright.yml, running on the
+# Microsoft-hosted ubuntu-latest agent. Manual trigger only.
+#
+# CI mode: unlike GitHub, ADO does NOT set a `CI` env var (it sets TF_BUILD).
+# playwright.config.ts flips into its CI mode (forbidOnly, retries: 2, workers: 1,
+# headless) off `process.env.CI`, so we set CI: true below explicitly — without it
+# the run would stay headed, which has no display on a hosted Linux agent.
+
+# ─── Thing you must set for your org ─────────────────────────────────────────────
+# - varGroup : a variable group holding the secrets/vars this pipeline reads
+#              (BASE_URL, NEM_EMAIL, NEM_PASSWORD, NEM_OTP_SECRET, the DB_* values,
+#              and optionally LOG_LEVEL). Mark the credential ones as secret.
+variables:
+  - group: CoreClaims-AutomationDeps          # <-- REPLACE with your variable group name
+  # Force playwright.config.ts into CI mode (headless, forbidOnly, retries).
+  - name: CI
+    value: 'true'
+
+# Manual trigger only (matches GitHub's workflow_dispatch). No CI/PR auto-runs.
+trigger: none
+pr: none
+
+# Mirror GitHub's `name: ${{ inputs.project }}` run title.
+name: ${{ parameters.project }}
+
+parameters:
+  - name: project
+    displayName: Project to run (db = Database.spec.ts, no browser)
+    type: string
+    default: chrome
+    values:
+      - db
+      - chrome
+      - all
+  - name: grep
+    displayName: 'Only run tests whose title matches (Playwright -g). Leave blank to run all.'
+    type: string
+    default: ' '
+
+jobs:
+  - job: test
+    displayName: ${{ parameters.project }}
+    timeoutInMinutes: 30
+    pool:
+      vmImage: ubuntu-latest
+
+    steps:
+      # ADO checks out `self` automatically; explicit here, and it keeps the clean
+      # workspace per run that the Allure history logic relies on.
+      - checkout: self
+        displayName: Checkout
+
+      - task: NodeTool@0
+        displayName: Setup Node.js
+        inputs:
+          versionSpec: '20.x'
+        # No npm cache here: this repo keeps no committed lockfile, and caching
+        # without one fails ("lock file is not found").
+
+      - script: npm install
+        displayName: Install dependencies
+        # npm install (not npm ci) because there is no package-lock.json to install from.
+
+      # Install only what the selected project needs:
+      #  - db      : no browser at all
+      #  - firefox / webkit : Playwright-managed engines; --with-deps pulls the
+      #                       system libraries they need on Linux
+      #  - chrome  : Google Chrome is preinstalled on the ubuntu-latest image
+      - bash: |
+          set -e
+          case "$PROJECT" in
+            db)     echo 'db project uses no browser - skipping browser install.' ;;
+            chrome) echo 'chrome uses the preinstalled Google Chrome on the agent - skipping install.' ;;
+            all)    npx playwright install --with-deps firefox webkit ;;
+            *)      npx playwright install --with-deps "$PROJECT" ;;
+          esac
+        displayName: Install Playwright browser
+        env:
+          PROJECT: ${{ parameters.project }}
+
+      # headless is forced on under CI by playwright.config.ts (CI=true above),
+      # which is required here since the hosted Linux agent has no display.
+      - bash: |
+          set -e
+          pwArgs=()
+          if [ "$PROJECT" != "all" ]; then pwArgs+=("--project=$PROJECT"); fi
+          grep_trimmed="$(echo "$GREP" | xargs)"
+          if [ -n "$grep_trimmed" ]; then pwArgs+=(-g "$grep_trimmed"); fi
+          npx playwright test "${pwArgs[@]}"
+        displayName: Run Playwright tests
+        env:
+          PROJECT: ${{ parameters.project }}
+          GREP: ${{ parameters.grep }}
+          # Left side = env var the config reads (do not rename); right side = your
+          # variable-group variable. Secret vars MUST be mapped here explicitly — ADO
+          # does not expose secrets to scripts automatically (non-secret vars are).
+          BASE_URL: $(BASE_URL)
+          VALID_USERNAME_1: $(NEM_EMAIL)
+          VALID_PASSWORD_1: $(NEM_PASSWORD)
+          VALID_OTP_SECRET_1: $(NEM_OTP_SECRET)
+          # DB-backed specs (db project). data_enrichment vars exist; the Membership
+          # test also needs MEMBERSHIP_DB_* — add those to the group or it fails at connect.
+          DATA_ENRICHMENT_DB_SERVER: $(DATA_ENRICHMENT_DB_SERVER)
+          DATA_ENRICHMENT_DB_NAME: $(DATA_ENRICHMENT_DB_NAME)
+          DATA_ENRICHMENT_DB_USER: $(DATA_ENRICHMENT_DB_USER)
+          DATA_ENRICHMENT_DB_PASSWORD: $(DATA_ENRICHMENT_DB_PASSWORD)
+          DATA_ENRICHMENT_DB_PORT: $(DATA_ENRICHMENT_DB_PORT)
+          MEMBERSHIP_DB_SERVER: $(MEMBERSHIP_DB_SERVER)
+          MEMBERSHIP_DB_NAME: $(MEMBERSHIP_DB_NAME)
+          MEMBERSHIP_DB_USER: $(MEMBERSHIP_DB_USER)
+          MEMBERSHIP_DB_PASSWORD: $(MEMBERSHIP_DB_PASSWORD)
+          MEMBERSHIP_DB_PORT: $(MEMBERSHIP_DB_PORT)
+          LOG_LEVEL: $(LOG_LEVEL)
+
+      # Upload the HTML report whether the run passed or failed, so failures are debuggable.
+      - task: PublishPipelineArtifact@1
+        displayName: Upload Playwright HTML report
+        condition: not(canceled())
+        inputs:
+          targetPath: playwright-report
+          artifact: playwright-report-${{ parameters.project }}
+
+      # Build the Allure report with all widgets enabled. Runs on failure too
+      # (not(canceled())), so a failed suite still produces a report. The hosted
+      # ubuntu-latest image already has Java on PATH, so no JDK hunting is needed.
+      #
+      # Trends/history: checkout wipes the workspace each run, so the previous report's
+      # history/ is stashed OUTSIDE the repo (under the agent user's $HOME, keyed per
+      # project) and copied back into allure-results/ before generating.
+      - bash: |
+          set -e
+          if [ ! -d allure-results ]; then
+            echo 'No allure-results produced (no tests ran?) - skipping Allure report.'
+            exit 0
+          fi
+
+          # Persistent, per-project history store that survives checkout's git clean.
+          histStore="$HOME/allure-history/PlaywrightTS-CoreClaims/$PROJECT"
+
+          # Carry the previous run's history into this run's results (enables trends).
+          if [ -d "$histStore" ] && [ -n "$(ls -A "$histStore" 2>/dev/null)" ]; then
+            mkdir -p allure-results/history
+            cp -R "$histStore"/. allure-results/history/
+          fi
+
+          # Environment widget (non-secret metadata only - never credentials).
+          cat > allure-results/environment.properties <<EOF
+          BASE_URL=$BASE_URL
+          Project=$PROJECT
+          Branch=$GIT_BRANCH
+          Commit=$GIT_SHA
+          OS=Ubuntu (Microsoft-hosted ubuntu-latest)
+          EOF
+
+          # Executor widget: names the build and links trend points back to this run.
+          cat > allure-results/executor.json <<EOF
+          {
+            "name": "Azure DevOps",
+            "type": "azure",
+            "reportName": "Playwright Tests - $PROJECT",
+            "buildName": "#$BUILD_NUMBER $PROJECT",
+            "buildOrder": $BUILD_ORDER,
+            "buildUrl": "$BUILD_URL",
+            "url": "$REPO_URL"
+          }
+          EOF
+
+          # Use the pinned allure-commandline (Allure 2) from node_modules, NOT any
+          # global `allure` on the agent: that one may be Allure 3, whose CLI dropped
+          # `--clean` and the positional results dir, so this command fails to parse.
+          npx allure generate allure-results --clean -o allure-report
+
+          # Stash this run's freshly generated history for the next run's trends.
+          if [ -d allure-report/history ]; then
+            mkdir -p "$histStore"
+            cp -R allure-report/history/. "$histStore"/
+          fi
+        displayName: Generate Allure report
+        condition: not(canceled())
+        env:
+          PROJECT: ${{ parameters.project }}
+          BASE_URL: $(BASE_URL)
+          GIT_BRANCH: $(Build.SourceBranchName)
+          GIT_SHA: $(Build.SourceVersion)
+          BUILD_NUMBER: $(Build.BuildNumber)
+          # buildOrder must be numeric; Build.BuildId is the monotonic integer id.
+          BUILD_ORDER: $(Build.BuildId)
+          BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+          REPO_URL: $(Build.Repository.Uri)
+
+      - task: PublishPipelineArtifact@1
+        displayName: Upload Allure report
+        condition: not(canceled())
+        inputs:
+          targetPath: allure-report
+          artifact: allure-report-${{ parameters.project }}
