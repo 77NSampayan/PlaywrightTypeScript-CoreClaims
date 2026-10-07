@@ -1,39 +1,204 @@
-name: Static checks (no test execution)
+name: Playwright Tests
+
+# Manual trigger only for now. CI env flips the config into its CI mode
+# (forbidOnly, retries: 2, workers: 1, headless) via the CI variable GitHub sets automatically.
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Project to run (db = Database.spec.ts, no browser)
+        type: choice
+        default: chrome
+        options:
+          - db
+          - chrome
+          - all
+      grep:
+        description: 'Only run tests whose title matches (Playwright -g). Leave blank to run all.'
+        type: string
+        default: ''
+
 jobs:
-  typecheck-and-list:
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ inputs.project }}
+    # Self-hosted Windows runner (AVD-BASCL06-0). Targeted by label, not name.
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 30
+    # Windows PowerShell is always present on the runner; pwsh may not be.
+    defaults:
+      run:
+        shell: powershell
+
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: lts/*
-    - name: Install dependencies
-      run: npm ci
-    # Deliberately does NOT run `npx playwright test`. Login.spec.ts performs a
-    # real Microsoft SSO sign-in (with a real TOTP secret) against a live portal,
-    # and the `db` project connects to a pre-production SQL Server — neither is
-    # safe to run unattended, on every push, from a GitHub-hosted runner with no
-    # network path to that server. See AUTHENTICATION.md § Known risks and
-    # REVIEW.md before changing this. Type-check plus a spec-list is the signal
-    # that's actually safe to run here; revisit once there's a decision on a
-    # dedicated CI service account and/or a self-hosted runner on the project
-    # network.
-    - name: Type-check
-      run: npx tsc --noEmit
-    - name: Verify specs still load
-      run: npx playwright test --list
-      env:
-        # playwright.config.ts checks BASE_URL/VALID_USERNAME_1/VALID_PASSWORD_1
-        # eagerly at config-load time (unlike the DB/OTP vars, which are lazy
-        # getters), so `--list` needs *some* value for each even though it never
-        # runs a test body or attempts a real login/navigation. Placeholders
-        # only — never real credentials or the actual portal URL.
-        BASE_URL: https://ci-placeholder.example.com
-        VALID_USERNAME_1: ci-placeholder@example.com
-        VALID_PASSWORD_1: ci-placeholder
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # No `cache: npm` here: it requires a committed lockfile, which this repo
+          # does not keep. Caching without one fails the run ("lock file is not found").
+
+      - name: Install dependencies
+        # npm install (not npm ci) because there is no package-lock.json to install from.
+        run: npm install
+
+      # Install only what the selected project needs:
+      #  - db      : no browser at all
+      #  - firefox / webkit : Playwright-managed engines, must be installed
+      #  - msedge / chrome  : branded browsers, use the ones already on the runner
+      - name: Install Playwright browser
+        run: |
+          switch ($env:PROJECT) {
+            'db'      { Write-Host 'db project uses no browser - skipping browser install.' }
+            'chrome'  { Write-Host 'chrome uses the system Google Chrome on the runner - skipping install.' }
+            'all'     { npx playwright install firefox webkit }
+            default   { npx playwright install $env:PROJECT }
+          }
+        env:
+          PROJECT: ${{ inputs.project }}
+
+      # headless is forced on under CI by playwright.config.ts (no display needed),
+      # so nothing extra is required for the browser projects here.
+      - name: Run Playwright tests
+        run: |
+          $pwArgs = @()
+          if ($env:PROJECT -ne 'all') { $pwArgs += "--project=$env:PROJECT" }
+          if ($env:GREP) { $pwArgs += '-g'; $pwArgs += $env:GREP }
+          npx playwright test @pwArgs
+        env:
+          PROJECT: ${{ inputs.project }}
+          GREP: ${{ inputs.grep }}
+          # Left side = env var the config reads (do not rename); right side = your GitHub secret.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.NEM_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.NEM_PASSWORD }}
+          VALID_OTP_SECRET_1: ${{ secrets.NEM_OTP_SECRET }}
+          # DB-backed specs (db project). data_enrichment secrets exist; the Membership
+          # test also needs MEMBERSHIP_DB_* — create those secrets or it fails at connect.
+          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          MEMBERSHIP_DB_SERVER: ${{ secrets.MEMBERSHIP_DB_SERVER }}
+          MEMBERSHIP_DB_NAME: ${{ secrets.MEMBERSHIP_DB_NAME }}
+          MEMBERSHIP_DB_USER: ${{ secrets.MEMBERSHIP_DB_USER }}
+          MEMBERSHIP_DB_PASSWORD: ${{ secrets.MEMBERSHIP_DB_PASSWORD }}
+          MEMBERSHIP_DB_PORT: ${{ secrets.MEMBERSHIP_DB_PORT }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+
+      # Upload the HTML report whether the run passed or failed, so failures are debuggable.
+      - name: Upload Playwright HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ inputs.project }}
+          path: playwright-report/
+
+      # Build the Allure report with all widgets enabled. Runs on failure too (!cancelled),
+      # so a failed suite still produces a report. Requires the Allure CLI + a JRE on the
+      # runner. Needs no committed lockfile and no browser.
+      #
+      # Trends/history: checkout wipes the workspace each run, so the previous report's
+      # history/ is stashed OUTSIDE the repo (under the runner user profile, keyed per
+      # project) and copied back into allure-results/ before generating.
+      - name: Generate Allure report
+        if: ${{ !cancelled() }}
+        run: |
+          if (-not (Test-Path 'allure-results')) {
+            Write-Host 'No allure-results produced (no tests ran?) - skipping Allure report.'
+            exit 0
+          }
+
+          # Persistent, per-project history store that survives checkout's git clean.
+          $histStore = Join-Path $env:USERPROFILE "allure-history\PlaywrightTS-CoreClaims\$env:PROJECT"
+
+          # Carry the previous run's history into this run's results (enables trends).
+          if (Test-Path "$histStore\*") {
+            New-Item -ItemType Directory -Force -Path 'allure-results\history' | Out-Null
+            Copy-Item "$histStore\*" 'allure-results\history' -Recurse -Force
+          }
+
+          # Environment widget (non-secret metadata only - never credentials).
+          @"
+          BASE_URL=$env:BASE_URL
+          Project=$env:PROJECT
+          Branch=$env:GIT_BRANCH
+          Commit=$env:GIT_SHA
+          OS=Windows (self-hosted AVD-BASCL06-0)
+          "@ | Out-File -FilePath 'allure-results\environment.properties' -Encoding ascii
+
+          # Executor widget: names the build and links trend points back to this run.
+          @"
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "reportName": "Playwright Tests - $env:PROJECT",
+            "buildName": "#$env:BUILD_NUMBER $env:PROJECT",
+            "buildOrder": $env:BUILD_NUMBER,
+            "buildUrl": "$env:BUILD_URL",
+            "url": "$env:REPO_URL"
+          }
+          "@ | Out-File -FilePath 'allure-results\executor.json' -Encoding ascii
+
+          # Allure's launcher is a JVM app. The runner service does not reliably inherit a
+          # user-level JAVA_HOME (and the current one is corrupted), so resolve a clean JDK
+          # here and set JAVA_HOME/PATH for THIS process only, overriding whatever is set.
+          $javaHome = $null
+          $javaCmd = Get-Command java.exe -ErrorAction SilentlyContinue
+          if ($javaCmd) {
+            # <jdk>\bin\java.exe -> <jdk>
+            $javaHome = Split-Path (Split-Path $javaCmd.Source -Parent) -Parent
+          }
+          if (-not $javaHome -or -not (Test-Path (Join-Path $javaHome 'bin\java.exe'))) {
+            $roots = @(
+              (Join-Path $env:ProgramFiles 'Eclipse Adoptium'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Eclipse Adoptium'),
+              (Join-Path $env:ProgramFiles 'Microsoft'),
+              (Join-Path $env:LOCALAPPDATA 'Programs\Eclipse Adoptium')
+            )
+            foreach ($r in $roots) {
+              if ($r -and (Test-Path $r)) {
+                $jdk = Get-ChildItem -Path $r -Directory -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -like 'jdk*' } |
+                       Sort-Object Name -Descending | Select-Object -First 1
+                if ($jdk) { $javaHome = $jdk.FullName; break }
+              }
+            }
+          }
+          if (-not $javaHome -or -not (Test-Path (Join-Path $javaHome 'bin\java.exe'))) {
+            throw "Could not locate a JDK. Install Temurin or set JAVA_HOME on the runner."
+          }
+          $env:JAVA_HOME = $javaHome
+          $env:PATH = (Join-Path $javaHome 'bin') + ';' + $env:PATH
+          Write-Host "Using JAVA_HOME=$javaHome"
+
+          # Prefer the globally installed CLI; fall back to the allure-commandline dep.
+          if (Get-Command allure -ErrorAction SilentlyContinue) {
+            allure generate allure-results --clean -o allure-report
+          } else {
+            npx allure generate allure-results --clean -o allure-report
+          }
+
+          # Stash this run's freshly generated history for the next run's trends.
+          if (Test-Path 'allure-report\history') {
+            New-Item -ItemType Directory -Force -Path $histStore | Out-Null
+            Copy-Item 'allure-report\history\*' $histStore -Recurse -Force
+          }
+        env:
+          PROJECT: ${{ inputs.project }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ inputs.project }}
+          path: allure-report/

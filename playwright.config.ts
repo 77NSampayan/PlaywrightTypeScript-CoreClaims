@@ -123,7 +123,7 @@ export default defineConfig({
     baseURL: requireEnv('BASE_URL'),
     // Headed locally by design (see README); CI runners have no display, so
     // force headless there rather than failing to launch.
-    headless: !!process.env.CI,
+    headless: false,
     // preprod/UAT (e.g. preprod.app.coreclaims.amplifyhealth.com, reached from a
     // portal app card) serves a self-signed/internal-CA cert Chromium doesn't trust.
     // Only acceptable because this targets non-production environments.
