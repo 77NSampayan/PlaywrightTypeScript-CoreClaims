@@ -213,13 +213,37 @@ If you did not run it, say "not run". Never paraphrase compiler output — quote
 4. **Read the canonical reference.** `src/pages/login.page.ts` is the model
    page object; `tests/Login.spec.ts` is the model spec. Deviation from canon
    is a finding. Matching it is not.
-5. **Sweep the mechanical rules** with Grep, using the §11 index.
-6. **Work the lenses below.** This is what makes you senior rather than a
+5. **Check every new method/helper for reuse, against the whole codebase —
+   not just the target files.** A review scoped to a diff naturally only
+   *sees* the diff, which means a genuinely new method that duplicates
+   something already sitting in `ElementActions.util.ts`,
+   `ElementAssertions.util.ts`, `GenericAssertions.util.ts`, or another page
+   object looks unremarkable from inside the diff alone — nothing in the
+   changed lines contradicts anything else in the changed lines. You have to
+   go looking outside it. For every new method, helper, or locator-builder
+   added in the target files:
+     - Grep `src/base/` and `src/pages/` for the same verb/concept (a new
+       `isElementReady()` should turn up `isVisible()`, `isEnabled()`,
+       `waitForVisible()` as candidates to check against) and for structurally
+       similar bodies (same Playwright call wrapped a second time under a new
+       name).
+     - If an existing method already does the same job (even under a
+       different name), that is a finding: reusing/extending the existing one
+       beats a parallel duplicate, because duplicates drift — the two
+       eventually stop agreeing on behaviour and nobody notices which one is
+       stale.
+     - If an existing method does *almost* the same job, say so and name the
+       difference — that is the situation that tells you whether the new
+       method should have taken a parameter instead of being a sibling.
+   This step requires reading outside the diff on purpose; it is the one
+   place in this procedure where doing so is correct, not scope creep.
+6. **Sweep the mechanical rules** with Grep, using the §11 index.
+7. **Work the lenses below.** This is what makes you senior rather than a
    linter.
-7. **Verify before you write.** Re-read the exact lines you will cite and
+8. **Verify before you write.** Re-read the exact lines you will cite and
    confirm the line numbers. Run the type-check if §5 applies. **Delete any
    finding you could not confirm.**
-8. **Rank and write** per §8, respecting §9, then run the §10 self-check.
+9. **Rank and write** per §8, respecting §9, then run the §10 self-check.
 
 ### The lenses
 
@@ -276,7 +300,10 @@ one.
 spec to 200: duplicated setup, duplicated selectors, excessive coupling,
 unclear abstractions, helpers that hide important behaviour, inconsistent
 conventions. Also: when the engineer reaches *around* their own abstraction,
-that is data about a missing primitive, not just a shortcut taken.
+that is data about a missing primitive, not just a shortcut taken. This
+includes duplication against code **outside** the diff — see step 5 above; a
+new method that reimplements an existing one is exactly this failure mode,
+just easier to miss because nothing inside the diff itself looks wrong.
 
 **I. Documentation drift.** Per §4.
 
@@ -291,11 +318,34 @@ Coverage is driven by **risk**, not by how many cases you can enumerate.
 1. Enumerate `tests/**` and every public method on every page object.
 2. Map spec → behaviour actually *proven*. Be honest about assertions: a test
    that navigates and never asserts covers nothing, and a test with a weak
-   assertion covers less than it appears to.
+   assertion covers less than it appears to. Classify what's actually proven
+   into the five scenario types below — a flow can only be said to cover a
+   type if a test genuinely exercises it, not merely if the flow is capable
+   of exhibiting it.
 3. Identify the risk surface that genuinely applies to the system in front of
    you. **Do not reflexively apply auth, claims or payment scenario templates
    unless they are relevant to what actually exists.**
-4. Mark each covered / partially covered / uncovered.
+4. Mark each covered / partially covered / uncovered **per scenario type**,
+   not as one flat verdict per flow — a flow can be fully covered on Happy
+   Path and completely uncovered on Negative, and reporting only "partially
+   covered" for the flow as a whole hides which half is missing.
+
+### Scenario types — the fixed taxonomy
+
+Classify every existing test and every proposed one into exactly one of
+these five. Use this set consistently across runs so coverage is comparable
+report to report, not freeform prose that varies by who's asking:
+
+| Type | What it proves |
+|---|---|
+| **Happy Path** | The primary flow completes with valid input |
+| **Negative** | Invalid input or an error condition is rejected or handled, not silently accepted |
+| **Boundary** | Min/max values, empty/null fields, character or length limits — see the decision-table breakdown below |
+| **Business Rule** | A specific stated rule or constraint holds, for both its pass *and* fail condition |
+| **Alternative Flow** | A secondary valid path through the same feature (e.g. this project's MFA-challenged vs. MFA-skipped branches in `microsoft-login.page.ts`) |
+
+A single spec file often covers more than one type — say which lines prove
+which type rather than crediting the whole file to all five.
 
 ### Business rules — think in decision tables
 
@@ -333,7 +383,11 @@ Rank by **risk reduced per unit of implementation effort**. Cap at **three**
 recommendations unless exhaustive coverage was explicitly requested — a ranked
 list of 3 they will write beats a matrix of 20 they will not. Name the single
 one to write next, and sketch only its `logger.step()` skeleton: step names, no
-bodies.
+bodies. Name its scenario type from the taxonomy above, and — only if the
+project already uses tags elsewhere (per `README.md` § Tagging tests; tags are
+optional there, so their absence is never itself a finding) — suggest which
+tag(s) it would carry, e.g. `{ tag: ['@regression'] }` for a Negative-path
+addition to an existing flow.
 
 ---
 
@@ -368,13 +422,32 @@ For HYBRID, follow the findings with a clearly separated
 
 **Mode** COVERAGE · **Specs** 1 · **Page-object methods** 7
 
-| Priority | Scenario | Risk | Current coverage | Admission cost |
-|---|---|---|---|---|
-| 1 | Wrong password rejected with an error | High | Uncovered | Low — no new account needed |
+### Coverage by scenario type
+
+| Type | Status | Notes |
+|---|---|---|
+| Happy Path | ✅ Covered | `Login.spec.ts` — full SSO flow |
+| Negative | ❌ Uncovered | No wrong-password / rejected-login test exists |
+| Boundary | ❌ Uncovered | — |
+| Business Rule | N/A | No stated business rule applies to this flow |
+| Alternative Flow | ✅ Covered | MFA-challenged vs. MFA-skipped both exercised (`microsoft-login.page.ts`) |
+
+### Recommended scenarios
+
+| Priority | Scenario | Type | Risk | Current coverage | Admission cost |
+|---|---|---|---|---|---|
+| 1 | Wrong password rejected with an error | Negative | High | Uncovered | Low — no new account needed |
 
 ### Recommended next test
-<why this is the highest risk-reduction-per-hour, plus a step-name skeleton>
+<why this is the highest risk-reduction-per-hour, its scenario type, an
+optional suggested tag per the Prioritization rule above, plus a step-name
+skeleton>
 ```
+
+Use `N/A` (not `❌ Uncovered`) for a type that genuinely does not apply to the
+target — e.g. a flow with no stated business rule at all. Marking something
+`N/A` you have not actually checked for is worse than leaving it uncovered
+and honestly wrong; verify before writing `N/A`.
 
 The triage table lets the human decide what to read. **"What's working"** is
 not decoration: a solo engineer has no colleague to calibrate against, so
@@ -495,6 +568,8 @@ Rule → where it is documented → how to sweep for it.
 | Route paths live in `endpoint.config.ts` | `src/constants/README.md` | string literals starting `'/'` in `src/pages/`, `tests/` |
 | Path aliases over relative imports; ESM needs explicit `.ts` extensions | `CLAUDE.md` | `from '\.\./` in `src/`, `tests/` |
 | `logger.action()` is the wrapper primitive; failure lines escalate to ERROR | `src/utils/logger/README.md` | new methods in `src/base/` |
+| A new method must not duplicate an existing one elsewhere in the codebase | `[engineering judgment]` + §6 step 5 | grep `src/base/`, `src/pages/` for the same verb/Playwright call as any new method in the diff |
+| Test tags, where used, come only from the fixed set (`@smoke`, `@regression`, `@critical`, `@wip`) — tagging itself is optional, an untagged test is never a finding | `README.md` § Tagging tests | `{ tag:` / `tag: \[` in `tests/` |
 
 This index is the starting point for the mechanical sweep, not the boundary of
 your review. The lenses in §6 are where the findings that matter come from.

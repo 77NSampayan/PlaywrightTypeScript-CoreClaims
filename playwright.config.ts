@@ -33,6 +33,62 @@ export const test_credentials = {
   },
 }
 
+// `??` only catches null/undefined, so `FOO_PORT=` (present but empty — an easy
+// state after `cp .env.example .env`) would silently become port 0 rather than
+// falling back. Treat empty the same way requireEnv() does: not there.
+function optionalPort(name: string, defaultPort: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return defaultPort;
+  }
+
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(`Invalid ${name}: "${raw}". Expected a positive port number.`);
+  }
+  return port;
+}
+
+// Getters, not plain properties — same reasoning as valid_otp_secret_1 above:
+// only DB-backed specs need these, so an eager requireEnv() here would break
+// every UI-only run for a config value it never touches.
+function dbConfigFromEnv(prefix: string) {
+  return {
+    get server(): string {
+      return requireEnv(`${prefix}_SERVER`);
+    },
+    get database(): string {
+      return requireEnv(`${prefix}_NAME`);
+    },
+    get user(): string {
+      return requireEnv(`${prefix}_USER`);
+    },
+    get password(): string {
+      return requireEnv(`${prefix}_PASSWORD`);
+    },
+    get port(): number {
+      return optionalPort(`${prefix}_PORT`, 1433);
+    },
+  };
+}
+
+// Pre-production — data_enrichment
+export const db_config = dbConfigFromEnv('DATA_ENRICHMENT_DB');
+
+// Membership database — separate server/credentials from db_config above.
+export const membership_db_config = dbConfigFromEnv('MEMBERSHIP_DB');
+
+// Azure Blob Storage SAS URL for the claims intake pipeline (writes to a real
+// production container) — lazy getter, same reasoning as db_config above:
+// only IntakeUpload.spec.ts touches this, so an eager requireEnv() here would
+// break every run that doesn't. This is a live, time-limited WRITE credential
+// (the SAS's own `se=` param expires it) — never log it, never commit it.
+export const intake_blob_config = {
+  get sasUrl(): string {
+    return requireEnv('INTAKE_BLOB_SAS_URL');
+  },
+};
+
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
@@ -52,13 +108,26 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   ...(process.env.CI ? { workers: 1 } : {}),
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  reporter: [
+    ['html'],
+    ['allure-playwright', {
+      resultsDir: 'allure-results',
+      detail: true,
+      suiteTitle: false,
+    }],
+  ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     actionTimeout: 10_000,
     /* Base URL to use in actions like `await page.goto('')`. */
-    baseURL: process.env.BASE_URL,
-    headless: false,
+    baseURL: requireEnv('BASE_URL'),
+    // Headed locally by design (see README); CI runners have no display, so
+    // force headless there rather than failing to launch.
+    headless: !!process.env.CI,
+    // preprod/UAT (e.g. preprod.app.coreclaims.amplifyhealth.com, reached from a
+    // portal app card) serves a self-signed/internal-CA cert Chromium doesn't trust.
+    // Only acceptable because this targets non-production environments.
+    ignoreHTTPSErrors: true,
     javaScriptEnabled: true,
     launchOptions: {
       args: ['--start-maximized'], // Tells browser to open maximized
@@ -70,22 +139,53 @@ export default defineConfig({
 
   /* Configure projects for major browsers */
   projects: [
+    // DB-backed specs (Database.spec.ts) touch no page/browser — running them
+    // here, and excluding them from the browser projects below via
+    // testIgnore, means one run of each query instead of three, and no
+    // browser launch just to print the configInfo banner.
     {
-      name: 'chromium',
-      use: { 
-        viewport: null, //Bypass Playwright's default 1280x720 resolution
-        },
+      name: 'db',
+      testMatch: /Database\.spec\.ts/,
+    },
+
+    // Same reasoning as the `db` project above: these specs each drive a
+    // real browser login, but their actual upload is a plain HTTP call
+    // (Azure Blob), not Core Claims page objects. Kept as their own project
+    // rather than folded into `db` since it's a different kind of external
+    // dependency (a live, time-limited SAS credential against a real
+    // production endpoint, not a database connection).
+    {
+      name: 'api',
+      testMatch: /(IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
     },
 
     {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      name: 'msedge',
+      testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+      use: {
+        ...devices['Desktop Edge'],
+        channel: 'msedge',
+        //viewport: null, //Bypass Playwright's default 1280x720 resolution
+      },
     },
 
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
+    // {
+    //   name: 'firefox',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Firefox'] },
+    // },
+
+    // {
+    //   name: 'webkit',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Safari'] },
+    // },
+
+    // {
+    //   name: 'chrome',
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload)\.spec\.ts/,
+    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    // },
 
     /* Test against mobile viewports. */
     // {
@@ -97,14 +197,10 @@ export default defineConfig({
     //   use: { ...devices['iPhone 12'] },
     // },
 
-    /* Test against branded browsers. */
+    /* Test against other browsers. */
     // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    //   name: 'chromium',
+    //   use: { viewport: null },
     // },
   ],
 
