@@ -9,6 +9,7 @@ import type {
     SelectOptionOptions,
     WaitForOptions,
     GetTextOptions,
+    GetValueOptions,
     PressSequentiallyOptions,
     IsEnabledOptions,
     IsEditableOptions,
@@ -102,6 +103,20 @@ export class ElementActions {
             // Ensure your SmartLogger natively handles string inputs here or accepts text callbacks
             `Successfully retrieved text content from "${description}"`,
             `Failed to extract text from "${description}"`
+        );
+    }
+
+    // An <input>/<textarea>/<select>'s current value is a DOM property, not
+    // rendered text — textContent() always returns '' for these, hence a
+    // separate method. Like getText(), the log lines never include the
+    // extracted value itself, only the description — safe to use on
+    // sensitive fields (e.g. a live SAS token output) without a mask option.
+    async getValue(locator: Locator, description: string, options?: GetValueOptions): Promise<string> {
+        return this.logger.action(
+            `Reading value of "${description}"`,
+            () => locator.inputValue(options),
+            `Successfully read value of "${description}"`,
+            `Failed to read value of "${description}"`
         );
     }
 
