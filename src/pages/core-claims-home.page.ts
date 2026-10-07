@@ -84,8 +84,37 @@ export class CoreClaimsHomePage extends BasePage {
         return this.page.locator(`#${id}`);
     };
 
+    // The <li> ancestor that carries the "open" class controlling whether this
+    // parent's child-menu-list is expanded — only relevant for items with children.
+    getMenuGroup(parentId: string): Locator {
+        return this.page.locator(`li.menu-group:has(#${parentId})`);
+    };
+
     async openNavMenu(): Promise<void> {
         await this.elements.click(this.menuToggleButton, 'Navigation menu toggle button');
+    };
+
+    async clickMenuItem(id: string, label: string): Promise<void> {
+        await this.elements.click(this.getMenuItem(id), `"${label}" menu item`);
+    };
+
+    // Sidebar top-level items with children are a real accordion — a child's
+    // <a> is only visible/clickable once its parent <li> has the "open" class.
+    // Only clicks the parent if it isn't already expanded, since clicking an
+    // already-open group would collapse it instead.
+    async expandMenuGroup(parentId: string): Promise<void> {
+        const alreadyOpen = await this.getMenuGroup(parentId)
+            .evaluate((el) => el.classList.contains('open'))
+            .catch(() => false);
+
+        if (!alreadyOpen) {
+            await this.elements.click(this.getMenuItem(parentId), `Expand "${parentId}" menu group`);
+        }
+    };
+
+    async clickSidebarSubMenuItem(parentId: string, childId: string, childLabel: string): Promise<void> {
+        await this.expandMenuGroup(parentId);
+        await this.elements.click(this.getMenuItem(childId), `"${childLabel}" menu item`);
     };
 
     // ─── Assertions ───────────────────────────
@@ -119,6 +148,10 @@ export class CoreClaimsHomePage extends BasePage {
     async expectSidebarNavVisible(): Promise<void> {
         for (const item of SIDEBAR_MENU_ITEMS) {
             await this.expectMenuItemVisible(item.id, item.label);
+
+            if (item.children.length > 0) {
+                await this.expandMenuGroup(item.id);
+            }
 
             for (const child of item.children) {
                 await this.expectMenuItemVisible(child.id, child.label);
