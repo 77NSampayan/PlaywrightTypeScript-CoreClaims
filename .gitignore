@@ -3,7 +3,7 @@
 .env
 .env.*
 !.env.example
-/package-lock.json/
+package-lock.json
 
 # Playwright
 node_modules/
