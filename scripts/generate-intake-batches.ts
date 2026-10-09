@@ -48,6 +48,18 @@ const REPO_ROOT = path.dirname(__dirname);
 const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
 const STATE_FILE = path.join(__dirname, '.intake-sequence-state.json');
 
+// Ad hoc "generate as if it were a different day" override (e.g. preparing
+// tomorrow's happy-path test data ahead of time) — FAKE_TODAY=YYYY-MM-DD.
+// Not meant as a standing feature to rely on; defaults to the real date.
+function getToday(): Date {
+    const override = process.env.FAKE_TODAY;
+    if (override) {
+        const parsed = new Date(`${override}T00:00:00`);
+        if (!isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+}
+
 const HEADERS = [
     'Member Code', 'Name', 'Company', 'Diagnosis', 'Dx Code', 'Doctor',
     'Source System', 'Visit Date', 'Visit Time', 'Consultation/Transaction ID',
@@ -136,7 +148,7 @@ async function saveState(state: SequenceState): Promise<void> {
 }
 
 function todayYyyyMmDd(): string {
-    const now = new Date();
+    const now = getToday();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     return `${now.getFullYear()}${month}${day}`;
@@ -255,7 +267,7 @@ export async function generateIntakeBatches(): Promise<void> {
     await mkdir(OUTPUT_DIR, { recursive: true });
 
     const state = await loadState();
-    const now = new Date();
+    const now = getToday();
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
 
