@@ -23,10 +23,10 @@
 //     real sample's production-looking sequence (~0015xxx) — avoids any risk
 //     of colliding with a real future NAV/Business Central document number.
 //     See randomFiveDigitBase()/loadState().
-//   - "new BOL Type" is set to match the payment mode (DPS/UB) rather than
-//     copying the real UB sample's value verbatim — that sample's internal
-//     content (CV-REGDPS doc. no., BOL type "DPS") looks like an unedited
-//     copy of the DPS file despite being UB-named.
+//   - "new BOL Type" is "DPS" for DPS and "E-CREDIT" for UB (per explicit
+//     instruction), not copied from the real UB sample's value verbatim —
+//     that sample's internal content (CV-REGDPS doc. no., BOL type "DPS")
+//     looks like an unedited copy of the DPS file despite being UB-named.
 //   - Created By / Message to Recipient / Account No. use placeholders
 //     rather than the real sample's values, which include a real
 //     employee's Windows login and bank-account-shaped values.
@@ -64,6 +64,13 @@ const PAYMENT_MODES: JournalPaymentMode[] = ['DPS', 'UB'];
 const DOCUMENT_NO_PREFIX: Record<JournalPaymentMode, string> = {
     DPS: 'CV-REGDPS-01-',
     UB: 'CV-EXPECR-01-',
+};
+
+// "new BOL Type" column value — not always the same string as the payment
+// mode itself (UB's is "E-CREDIT", per explicit instruction).
+const NEW_BOL_TYPE: Record<JournalPaymentMode, string> = {
+    DPS: 'DPS',
+    UB: 'E-CREDIT',
 };
 
 // ComCheck's Disbursement File — d_code never changes, per explicit
@@ -282,7 +289,7 @@ async function buildJournalWorkbook(
         COMMON_FIELDS.crossedCheck,
         COMMON_FIELDS.sentToLegacy,
         ' ', // old BOL Type (single space in the real samples)
-        paymentMode, // new BOL Type — matches this file's own payment mode
+        NEW_BOL_TYPE[paymentMode], // new BOL Type — "E-CREDIT" for UB, not "UB"
     ]);
 
     return workbook;
