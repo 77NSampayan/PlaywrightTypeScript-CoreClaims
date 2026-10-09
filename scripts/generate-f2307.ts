@@ -28,7 +28,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { generateIntakeBatches, PAYMENT_MODE_DOCTORS } from './generate-intake-batches.ts';
+import { generateIntakeBatches, isDoctorForMode } from './generate-intake-batches.ts';
 import { readPassingRows } from './generate-payment-journal.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,18 +66,24 @@ export async function generateF2307(): Promise<void> {
     await mkdir(OUTPUT_DIR, { recursive: true });
 
     let rows = await readPassingRows();
-    if (rows.length === 0) {
+    let match = rows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
+    if (!match) {
+        // Not "rows.length === 0" — test-data/intake/ can have rows from
+        // unrelated/stale files (a different doctor entirely) without
+        // having one for the payment mode we actually need.
         await generateIntakeBatches();
         rows = await readPassingRows();
+        match = rows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
     }
 
-    const targetDoctor = PAYMENT_MODE_DOCTORS.COMCHECK.trim();
-    const match = rows.find((row) => row.doctor === targetDoctor);
     if (!match) {
-        throw new Error(`No passing OPEML row found for COMCHECK (doctor "${targetDoctor}") — nothing to reference.`);
+        throw new Error('No passing OPEML row found for COMCHECK — nothing to reference.');
     }
 
-    const bytes = await buildF2307(targetDoctor);
+    // Use the matched row's actual doctor, not a fixed constant — ComCheck
+    // has two valid doctors, and whichever one this specific row has is
+    // what should appear as the Payee's Name.
+    const bytes = await buildF2307(match.doctor);
 
     const outPath = path.join(OUTPUT_DIR, `F2307_${match.controlCode}.pdf`);
     await writeFile(outPath, bytes);

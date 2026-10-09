@@ -57,15 +57,28 @@ const HEADERS = [
 
 export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
 
-// Doctor name must match the live system's physician master data exactly,
-// including the trailing space on two of these three (present in the
-// reference files too) — the app looks the doctor up by this string, so a
-// "cleaned up" name would silently break the payment-mode routing.
-export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string> = {
-    DPS: 'TOMAS ANTONIO',
-    COMCHECK: 'JAN ROSLYN T. EMPINADO ',
-    UB: 'MA. TERESA VICTORIA LUCIA DIMAGIBA ',
+// Doctor name(s) must match the live system's physician master data exactly,
+// including the trailing space on some of these (present in the reference
+// files too) — the app looks the doctor up by this string, so a "cleaned
+// up" name would silently break the payment-mode routing.
+//
+// ComCheck has two valid doctors (per the real physician reference table) —
+// pickDoctor() rotates between them when generating new rows, and
+// isDoctorForMode() treats either as valid when matching existing rows.
+export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string[]> = {
+    DPS: ['TOMAS ANTONIO'],
+    COMCHECK: ['JAN ROSLYN T. EMPINADO ', 'VILLANUEVA, PURA CORAZON REYES'],
+    UB: ['MA. TERESA VICTORIA LUCIA DIMAGIBA '],
 };
+
+export function pickDoctor(paymentMode: PaymentMode): string {
+    const doctors = PAYMENT_MODE_DOCTORS[paymentMode];
+    return doctors[Math.floor(Math.random() * doctors.length)]!;
+}
+
+export function isDoctorForMode(doctor: string, paymentMode: PaymentMode): boolean {
+    return PAYMENT_MODE_DOCTORS[paymentMode].some((d) => d.trim() === doctor.trim());
+}
 
 // Fixed test-environment values, reused verbatim from the reference files —
 // these are system/test config constants, not patient data.
@@ -192,7 +205,7 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
 
     sheet.columns = HEADERS.map((header, i) => ({ header, width: COLUMN_WIDTHS[i]! }));
 
-    const doctor = PAYMENT_MODE_DOCTORS[paymentMode];
+    const doctor = pickDoctor(paymentMode);
 
     patients.forEach((patient, i) => {
         const diagnosis = negative ? '' : SAMPLE_DIAGNOSIS.diagnosis;

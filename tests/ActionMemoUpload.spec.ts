@@ -3,7 +3,7 @@ import { test } from '@fixtures/base.fixture.ts';
 import { test_credentials } from '@root/playwright.config.ts';
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { checkSasNotExpired, scopeToFolder, uploadFileToBlob } from '@utils/blobUpload.util.ts';
-import { generateIntakeBatches, PAYMENT_MODE_DOCTORS, type PaymentMode } from '../scripts/generate-intake-batches.ts';
+import { generateIntakeBatches, isDoctorForMode, type PaymentMode } from '../scripts/generate-intake-batches.ts';
 import { generateClaimMemos, readFailedRows } from '../scripts/generate-claim-memos.ts';
 
 const MEMO_DIR = 'test-data/intake/memos';
@@ -33,29 +33,36 @@ function resolveFolder(baseFolder: string, paymentMode: PaymentMode): string {
 // generate-claim-memos.ts itself uses) against the memo filenames' Control
 // Code prefix, rather than assuming a fixed/hardcoded control code.
 async function findActionMemosForPaymentMode(paymentMode: PaymentMode): Promise<string[]> {
+    const matchesMode = (row: { doctor: string }) => isDoctorForMode(row.doctor, paymentMode);
+
+    // Not "failedRows.length === 0" — test-data/intake/ can have rows from
+    // unrelated/stale files (a different doctor entirely) without having
+    // one for this payment mode specifically.
     let failedRows = await readFailedRows();
-    if (failedRows.length === 0) {
+    let controlCodes = new Set(failedRows.filter(matchesMode).map((row) => row.controlCode));
+    if (controlCodes.size === 0) {
         await generateIntakeBatches();
         failedRows = await readFailedRows();
+        controlCodes = new Set(failedRows.filter(matchesMode).map((row) => row.controlCode));
     }
 
-    const targetDoctor = PAYMENT_MODE_DOCTORS[paymentMode];
-    const controlCodes = new Set(
-        failedRows.filter((row) => row.doctor === targetDoctor.trim()).map((row) => row.controlCode)
-    );
     if (controlCodes.size === 0) {
-        throw new Error(`No OPEML rows found for ${paymentMode} (doctor "${targetDoctor}") — nothing to upload.`);
+        throw new Error(`No OPEML rows found for ${paymentMode} — nothing to upload.`);
     }
 
+    const matchesControlCode = (f: string) =>
+        f.toLowerCase().endsWith('_am.pdf') && [...controlCodes].some((code) => f.startsWith(code));
+
+    // Same "check for this payment mode specifically, not just non-empty"
+    // reasoning as the controlCodes check above.
     let memoFiles = await readdir(MEMO_DIR).catch(() => [] as string[]);
-    if (memoFiles.length === 0) {
+    let matches = memoFiles.filter(matchesControlCode);
+    if (matches.length === 0) {
         await generateClaimMemos();
         memoFiles = await readdir(MEMO_DIR);
+        matches = memoFiles.filter(matchesControlCode);
     }
 
-    const matches = memoFiles.filter(
-        (f) => f.toLowerCase().endsWith('_am.pdf') && [...controlCodes].some((code) => f.startsWith(code))
-    );
     if (matches.length === 0) {
         throw new Error(`No Action Memo PDFs found for ${paymentMode} under ${MEMO_DIR}/ even after generating.`);
     }
