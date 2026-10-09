@@ -49,7 +49,7 @@ import ExcelJS from 'exceljs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { generateIntakeBatches, PAYMENT_MODE_DOCTORS } from './generate-intake-batches.ts';
+import { generateIntakeBatches, isDoctorForMode } from './generate-intake-batches.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
@@ -298,8 +298,14 @@ async function buildJournalWorkbook(
 export async function generatePaymentJournals(): Promise<void> {
     await mkdir(OUTPUT_DIR, { recursive: true });
 
+    // Not "passingRows.length === 0" — test-data/intake/ can have rows from
+    // unrelated/stale files (a different doctor entirely) without having
+    // one for every payment mode this needs.
     let passingRows = await readPassingRows();
-    if (passingRows.length === 0) {
+    const hasAllDoctors = (rows: PassingRow[]) =>
+        PAYMENT_MODES.every((mode) => rows.some((row) => isDoctorForMode(row.doctor, mode)));
+
+    if (!hasAllDoctors(passingRows)) {
         await generateIntakeBatches();
         passingRows = await readPassingRows();
     }
@@ -310,7 +316,7 @@ export async function generatePaymentJournals(): Promise<void> {
     const todayFormatted = formatMmDdYyyy(today);
 
     for (const paymentMode of PAYMENT_MODES) {
-        const match = passingRows.find((row) => row.doctor === PAYMENT_MODE_DOCTORS[paymentMode].trim());
+        const match = passingRows.find((row) => isDoctorForMode(row.doctor, paymentMode));
         if (!match) {
             throw new Error(`No passing OPEML row found for ${paymentMode} — nothing to reference.`);
         }
@@ -348,13 +354,17 @@ function buildDisbursementWorkbook(checkNo: string, checkDateFormatted: string, 
 export async function generateDisbursementFile(): Promise<void> {
     await mkdir(DISBURSEMENT_OUTPUT_DIR, { recursive: true });
 
+    // Not "passingRows.length === 0" — test-data/intake/ can have rows from
+    // unrelated/stale files (a different doctor entirely) without having
+    // one for COMCHECK specifically.
     let passingRows = await readPassingRows();
-    if (passingRows.length === 0) {
+    let match = passingRows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
+    if (!match) {
         await generateIntakeBatches();
         passingRows = await readPassingRows();
+        match = passingRows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
     }
 
-    const match = passingRows.find((row) => row.doctor === PAYMENT_MODE_DOCTORS.COMCHECK.trim());
     if (!match) {
         throw new Error('No passing OPEML row found for COMCHECK — nothing to reference.');
     }
