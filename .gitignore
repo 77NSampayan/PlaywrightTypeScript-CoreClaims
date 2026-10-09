@@ -3,7 +3,7 @@
 .env
 .env.*
 !.env.example
-package-lock.json
+# package-lock.json
 
 # Playwright
 node_modules/
@@ -19,13 +19,18 @@ playwright-report*.zip
 /allure-results/
 /allure-report/
 
-# Generated OPEML claim-upload test data (test-data/intake) and any reference
-# OPEML*.xlsx dropped at the repo root — regenerate via
-# scripts/generate-intake-batches.ts rather than committing; reference copies
-# may carry real member data and must never be pushed.
+# Generated OPEML claim-upload test data (test-data/intake), generated
+# Payment Journal files (test-data/payment-journal), and any reference
+# OPEML*/*PAYMENT JOURNAL*.xlsx dropped at the repo root — regenerate via
+# scripts/generate-intake-batches.ts / scripts/generate-payment-journal.ts
+# rather than committing; reference copies may carry real data and must
+# never be pushed.
 /test-data/
 /OPEML*.xlsx
+/*PAYMENT JOURNAL*.xlsx
+/*-PF-IP-MS-EFT_CNFHM*.xlsx
 
-# Local run-state for the intake generator (filename counter/date, last
-# Transaction ID suffix) — machine-specific, not shared.
+# Local run-state for the generators (filename counters, last Transaction ID
+# suffix, last Document No.) — machine-specific, not shared.
 /scripts/.intake-sequence-state.json
+/scripts/.payment-journal-sequence-state.json
