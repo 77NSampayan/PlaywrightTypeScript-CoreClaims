@@ -1,11 +1,13 @@
 // Generates OPEML claim-upload test data for the three payment modes (DPS,
 // ComCheck, UB/UnionBank), as two batches:
 //
-//   - NEGATIVE batch (first 3 files): every row has Action Memo = "Y" and
-//     blank Diagnosis/Dx Code, so the upload is expected to fail.
+//   - NEGATIVE batch (first 3 files): 2 rows each — the 1st row is complete
+//     and passing (Action Memo = "N"), and only the 2nd row is the
+//     deliberate failure (blank Diagnosis/Dx Code, Action Memo = "Y"). Not
+//     every row in the file fails.
 //   - POSITIVE batch (next 3 files): same doctor-per-payment-mode mapping
-//     and column structure, but complete fields (Action Memo = "N",
-//     Diagnosis/Dx Code filled in) and different patients.
+//     and column structure, but every row is complete (Action Memo = "N",
+//     Diagnosis/Dx Code filled in) and uses different patients.
 //
 // Filenames are OPEML<today's date, YYYYMMDD><5-digit running counter>T —
 // the counter continues across runs on the same day (persisted in
@@ -220,9 +222,14 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
     const doctor = pickDoctor(paymentMode);
 
     patients.forEach((patient, i) => {
-        const diagnosis = negative ? '' : SAMPLE_DIAGNOSIS.diagnosis;
-        const dxCode = negative ? '' : SAMPLE_DIAGNOSIS.dxCode;
-        const actionMemo = negative ? 'Y' : 'N';
+        // In a negative-batch file, only the 2nd row is the deliberate
+        // failure (blank Diagnosis/Dx Code, Action Memo = "Y") — the 1st row
+        // is complete and passing, so the file isn't "every row fails."
+        // Positive batches are unaffected: every row stays complete/"N".
+        const rowFails = negative && i > 0;
+        const diagnosis = rowFails ? '' : SAMPLE_DIAGNOSIS.diagnosis;
+        const dxCode = rowFails ? '' : SAMPLE_DIAGNOSIS.dxCode;
+        const actionMemo = rowFails ? 'Y' : 'N';
 
         sheet.addRow([
             patient.memberCode,
