@@ -12,23 +12,26 @@
 // from-scratch version didn't visually match the template ("bit its
 // different to the template i sent").
 //
-// Depends on test-data/intake/ already having a *passing* (Action Memo =
-// "N") OPEML row for ComCheck — Payee's Name is that row's Doctor (per
-// "you will get it in the intake file of ComCheck"), and the filename is
-// built from that row's Control Code ("F2307_{ControlCode}", per the
-// field-mapping template).
+// Generates one F2307 per ComCheck OPEML row currently in test-data/intake/
+// — both the passing (Action Memo = "N") and failing ("Y") batch — not just
+// the first passing match, since a F2307 is a payee tax cert tied to a given
+// claim transaction, regardless of whether that claim itself passed
+// validation. Payee's Name is each row's Doctor (per "you will get it in the
+// intake file of ComCheck"), and the filename is built from that row's
+// Control Code ("F2307_{ControlCode}", per the field-mapping template).
 //
 // Usage:
 //     node scripts/generate-f2307.ts
 //
 // Output:
-//     test-data/f2307/F2307_<ControlCode>.pdf
+//     test-data/f2307/F2307_<ControlCode>.pdf (one per ComCheck row)
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { generateIntakeBatches, isDoctorForMode } from './generate-intake-batches.ts';
+import { readFailedRows } from './generate-claim-memos.ts';
 import { readPassingRows } from './generate-payment-journal.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,32 +65,43 @@ async function buildF2307(payeeName: string): Promise<Uint8Array> {
     return doc.save();
 }
 
+async function findComcheckRows(): Promise<{ controlCode: string; doctor: string }[]> {
+    const [passing, failed] = await Promise.all([readPassingRows(), readFailedRows()]);
+    const comcheckRows = [...passing, ...failed].filter((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
+
+    // A single OPEML file can carry more than one row for the same claim
+    // (e.g. generate-intake-batches.ts's 2-patient batches) — dedupe by
+    // Control Code so each one only produces a single F2307.
+    const seen = new Set<string>();
+    return comcheckRows.filter((row) => (seen.has(row.controlCode) ? false : (seen.add(row.controlCode), true)));
+}
+
 export async function generateF2307(): Promise<void> {
     await mkdir(OUTPUT_DIR, { recursive: true });
 
-    let rows = await readPassingRows();
-    let match = rows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
-    if (!match) {
+    let matches = await findComcheckRows();
+    if (matches.length === 0) {
         // Not "rows.length === 0" — test-data/intake/ can have rows from
         // unrelated/stale files (a different doctor entirely) without
         // having one for the payment mode we actually need.
         await generateIntakeBatches();
-        rows = await readPassingRows();
-        match = rows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
+        matches = await findComcheckRows();
     }
 
-    if (!match) {
-        throw new Error('No passing OPEML row found for COMCHECK — nothing to reference.');
+    if (matches.length === 0) {
+        throw new Error('No OPEML row found for COMCHECK — nothing to reference.');
     }
 
-    // Use the matched row's actual doctor, not a fixed constant — ComCheck
-    // has two valid doctors, and whichever one this specific row has is
-    // what should appear as the Payee's Name.
-    const bytes = await buildF2307(match.doctor);
+    for (const match of matches) {
+        // Use the matched row's actual doctor, not a fixed constant — ComCheck
+        // has two valid doctors, and whichever one this specific row has is
+        // what should appear as the Payee's Name.
+        const bytes = await buildF2307(match.doctor);
 
-    const outPath = path.join(OUTPUT_DIR, `F2307_${match.controlCode}.pdf`);
-    await writeFile(outPath, bytes);
-    console.log(`Wrote F2307: ${outPath}`);
+        const outPath = path.join(OUTPUT_DIR, `F2307_${match.controlCode}.pdf`);
+        await writeFile(outPath, bytes);
+        console.log(`Wrote F2307: ${outPath}`);
+    }
 }
 
 // Runs automatically only when invoked directly (`node scripts/generate-f2307.ts`),

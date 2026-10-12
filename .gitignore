@@ -28,7 +28,7 @@ playwright-report*.zip
 /test-data/
 /OPEML*.xlsx
 /*PAYMENT JOURNAL*.xlsx
-/*-PF-IP-MS-EFT_CNFHM*.xlsx
+/*-PF-IP-MS-EFT_COMCHECK*.xlsx
 
 # Local run-state for the generators (filename counters, last Transaction ID
 # suffix, last Document No.) — machine-specific, not shared.

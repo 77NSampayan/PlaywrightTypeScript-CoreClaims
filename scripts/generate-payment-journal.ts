@@ -43,7 +43,7 @@
 // Output:
 //     test-data/payment-journal/DPS_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
 //     test-data/payment-journal/UB_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_CNFHM.xlsx
+//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_COMCHECK.xlsx
 
 import ExcelJS from 'exceljs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
@@ -57,6 +57,18 @@ const INTAKE_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
 const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'payment-journal');
 const DISBURSEMENT_OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'disbursement');
 const STATE_FILE = path.join(__dirname, '.payment-journal-sequence-state.json');
+
+// Ad hoc "generate as if it were a different day" override (e.g. preparing
+// tomorrow's happy-path test data ahead of time) — FAKE_TODAY=YYYY-MM-DD.
+// Not meant as a standing feature to rely on; defaults to the real date.
+function getToday(): Date {
+    const override = process.env.FAKE_TODAY;
+    if (override) {
+        const parsed = new Date(`${override}T00:00:00`);
+        if (!isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+}
 
 type JournalPaymentMode = 'DPS' | 'UB';
 const PAYMENT_MODES: JournalPaymentMode[] = ['DPS', 'UB'];
@@ -138,7 +150,7 @@ type SequenceState = {
 };
 
 function todayYyyyMmDd(): string {
-    const now = new Date();
+    const now = getToday();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     return `${now.getFullYear()}${month}${day}`;
@@ -311,7 +323,7 @@ export async function generatePaymentJournals(): Promise<void> {
     }
 
     const state = await loadState();
-    const today = new Date();
+    const today = getToday();
     const dateStamp = formatMmDdYy(today);
     const todayFormatted = formatMmDdYyyy(today);
 
@@ -370,13 +382,13 @@ export async function generateDisbursementFile(): Promise<void> {
     }
 
     const state = await loadState();
-    const today = new Date();
+    const today = getToday();
     const todayCompact = todayYyyyMmDd();
 
     const checkNo = nextCheckNo(todayCompact, state);
     const workbook = buildDisbursementWorkbook(checkNo, formatMmDdYyyy(today), match.controlCode);
 
-    const outPath = path.join(DISBURSEMENT_OUTPUT_DIR, `${formatMmDdYy(today)}-PF-IP-MS-EFT_CNFHM.xlsx`);
+    const outPath = path.join(DISBURSEMENT_OUTPUT_DIR, `${formatMmDdYy(today)}-PF-IP-MS-EFT_COMCHECK.xlsx`);
     await workbook.xlsx.writeFile(outPath);
     console.log(`Wrote ComCheck Disbursement File: ${outPath}`);
 

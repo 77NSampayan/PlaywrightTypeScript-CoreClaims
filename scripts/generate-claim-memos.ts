@@ -1,13 +1,26 @@
 // Generates the Action Memo (AM) and Disapproval Memo (DM) PDF pair MediCard
 // issues per patient for every OPEML row tagged Action Memo = "Y" (i.e. the
-// rows the claim upload is expected to reject). Content/layout and the file
-// naming convention are copied from the real reference documents:
-//   OPEML2026092900428T_ROMEO DINGLASAN_09282026_AM.pdf
-//   OPEML2026092900428T_ROMEO DINGLASAN_09282026_DM.pdf
-// and the "Action Memo / Disapproved Memo" field-mapping template (control
-// number, member's name, visit date, reason — reason "can reflect NULL" in
-// the template; here it's always the deliberate reason our own negative
-// batch rows fail: a missing Diagnosis).
+// rows the claim upload is expected to reject).
+//
+// Built directly on top of the real reference documents — not a from-scratch
+// plain-text reconstruction, which previously drifted from the real layout
+// (missing the MediCard logo/watermark, DM's ISO certification badge, field
+// positions, fonts, highlight box, etc.):
+//   scripts/templates/ActionMemo_sample.pdf
+//   scripts/templates/DisapprovalMemo_sample.pdf
+// Every coordinate/font/size below was measured off those two PDFs with
+// PyMuPDF (span "origin" = exact baseline point, page.get_images()/
+// get_drawings() for the logo/watermark/badge image rects and the DM
+// divider lines). The logo, watermark and ISO badge images themselves are
+// extracted into scripts/templates/assets/ (combined with their PDF soft
+// masks so the watermark/logo transparency survives) and re-embedded here —
+// same "load the real artifact, overlay only what's dynamic" approach used
+// for the F2307 template.
+//
+// Field-mapping (control number, member's name, visit date, reason — reason
+// "can reflect NULL" in the template; here it's always the deliberate reason
+// our own negative batch rows fail: a missing Diagnosis) is unchanged from
+// before.
 //
 // Reads every .xlsx already produced by generate-intake-batches.ts under
 // test-data/intake/ rather than re-deriving which rows were "just" generated
@@ -23,7 +36,7 @@
 
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import { mkdir, readdir, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -31,6 +44,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
 const INTAKE_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
 const MEMO_DIR = path.join(INTAKE_DIR, 'memos');
+const ASSETS_DIR = path.join(__dirname, 'templates', 'assets');
 
 // The reason is always this for our own negative-batch data: every "Y"-tagged
 // row is deliberately generated with blank Diagnosis/Dx Code. In the real
@@ -45,6 +59,19 @@ export type FailedRow = {
     /** As stored in the sheet, e.g. "10/04/2026". */
     visitDateSlash: string;
 };
+
+// Visit Date is written as plain "MM/DD/YYYY" text by generate-intake-batches.ts,
+// but a cell that's been opened/resaved in Excel can come back from ExcelJS as a
+// native Date object instead — String(date) then produces a colon-laden form
+// ("Fri Oct 09 2026 08:00:00 GMT+0800 ...") that isn't a valid filename fragment.
+function cellToDateSlash(value: ExcelJS.CellValue): string {
+    if (value instanceof Date) {
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${month}/${day}/${value.getFullYear()}`;
+    }
+    return String(value ?? '').trim();
+}
 
 export async function readFailedRows(): Promise<FailedRow[]> {
     const rows: FailedRow[] = [];
@@ -73,7 +100,7 @@ export async function readFailedRows(): Promise<FailedRow[]> {
             rows.push({
                 memberName: String(row.getCell(2).value ?? '').trim(),   // "Name"
                 doctor: String(row.getCell(6).value ?? '').trim(),       // "Doctor"
-                visitDateSlash: String(row.getCell(8).value ?? '').trim(), // "Visit Date"
+                visitDateSlash: cellToDateSlash(row.getCell(8).value), // "Visit Date"
                 controlCode: String(row.getCell(14).value ?? '').trim(), // "Control Code"
             });
         });
@@ -86,12 +113,6 @@ function slashToCompact(dateSlash: string): string {
     // "10/04/2026" -> "10042026" — matches the template's file-naming example
     // (…_10052026_AM.pdf).
     return dateSlash.replace(/\//g, '');
-}
-
-function slashToIso(dateSlash: string): string {
-    // "10/04/2026" -> "2026-10-04"
-    const [month, day, year] = dateSlash.split('/');
-    return `${year}-${month}-${day}`;
 }
 
 function formatIsoToday(date: Date): string {
@@ -111,141 +132,179 @@ function formatLongToday(date: Date): string {
 
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
-const LEFT_MARGIN = 72;
-const LINE_HEIGHT = 16;
 
-type Writer = {
-    page: PDFPage;
-    font: PDFFont;
-    bold: PDFFont;
-    y: number;
-};
+type DrawOpts = { bold?: boolean; italic?: boolean; size?: number };
 
-function line(w: Writer, text: string, opts: { bold?: boolean; size?: number; indent?: number } = {}): void {
-    const size = opts.size ?? 10;
-    w.page.drawText(text, {
-        x: LEFT_MARGIN + (opts.indent ?? 0),
-        y: w.y,
-        size,
-        font: opts.bold ? w.bold : w.font,
+// A draw() call's y is "distance from the top", matching PyMuPDF span
+// origins directly — so every constant below can be copied straight out of
+// the inspection script's output without a manual bottom-up conversion.
+function makeDrawer(page: PDFPage, font: PDFFont, bold: PDFFont, italic: PDFFont) {
+    return (text: string, x: number, yFromTop: number, opts: DrawOpts = {}): void => {
+        page.drawText(text, {
+            x,
+            y: PAGE_HEIGHT - yFromTop,
+            size: opts.size ?? 11,
+            font: opts.italic ? italic : opts.bold ? bold : font,
+            color: rgb(0, 0, 0),
+        });
+    };
+}
+
+function drawHLine(page: PDFPage, x0: number, x1: number, yFromTop: number): void {
+    page.drawLine({
+        start: { x: x0, y: PAGE_HEIGHT - yFromTop },
+        end: { x: x1, y: PAGE_HEIGHT - yFromTop },
+        thickness: 1,
         color: rgb(0, 0, 0),
     });
-    w.y -= LINE_HEIGHT;
 }
 
-function centered(w: Writer, text: string, opts: { bold?: boolean; size?: number } = {}): void {
-    const size = opts.size ?? 13;
-    const font = opts.bold ? w.bold : w.font;
-    const textWidth = font.widthOfTextAtSize(text, size);
-    w.page.drawText(text, {
-        x: (PAGE_WIDTH - textWidth) / 2,
-        y: w.y,
-        size,
-        font,
-        color: rgb(0, 0, 0),
-    });
-    w.y -= LINE_HEIGHT * 1.5;
+async function embedAsset(doc: PDFDocument, fileName: string) {
+    const bytes = await readFile(path.join(ASSETS_DIR, fileName));
+    return fileName.endsWith('.jpeg') || fileName.endsWith('.jpg') ? doc.embedJpg(bytes) : doc.embedPng(bytes);
 }
 
-function blank(w: Writer, count = 1): void {
-    w.y -= LINE_HEIGHT * count;
-}
-
+// Coordinates/sizes measured directly off scripts/templates/ActionMemo_sample.pdf.
 async function buildActionMemo(row: FailedRow, today: Date): Promise<Uint8Array> {
     const doc = await PDFDocument.create();
     const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-    const w: Writer = { page, font, bold, y: PAGE_HEIGHT - 60 };
+    const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+    const draw = makeDrawer(page, font, bold, italic);
 
     const todayIso = formatIsoToday(today);
 
-    line(w, 'MediCard Philippines, Inc.', { bold: true, size: 12 });
-    line(w, '27F AIA Tower (formerly Philam Life Tower)', { size: 9 });
-    line(w, '8767 Paseo De Roxas cor. Ayala Avenue, Makati City, Philippines 1226', { size: 9 });
-    line(w, '(02) 8884-9999 / (02) 8841-8080', { size: 9 });
-    line(w, 'www.medicardphils.com', { size: 9 });
-    blank(w, 1.5);
+    const watermark = await embedAsset(doc, 'am_watermark.png');
+    page.drawImage(watermark, { x: 326.24, y: PAGE_HEIGHT - 790.89, width: 286.47, height: 286.47 });
 
-    centered(w, 'ACTION MEMO', { bold: true, size: 14 });
-    blank(w, 0.5);
+    const logo = await embedAsset(doc, 'am_logo.png');
+    page.drawImage(logo, { x: 36, y: PAGE_HEIGHT - 75.66, width: 154.46, height: 44.99 });
 
-    line(w, `TO      : ${row.doctor}`);
-    line(w, 'FROM    : CLAIMS DEPARTMENT');
-    line(w, `SUBJECT : ${row.memberName}`);
-    line(w, `DATE    : ${slashToIso(row.visitDateSlash)}`);
-    blank(w);
+    // Footer address block (the real template's only header content is the
+    // logo above — this block sits at the bottom of the page, not the top).
+    draw('MediCard Philippines, Inc.', 72.11, 708.58, { bold: true, size: 7 });
+    draw('27F AIA Tower (formerly Philam Life Tower)', 72.11, 716.63, { size: 7 });
+    draw('8767 Paseo De Roxas cor. Ayala Avenue, Makati City, Philippines 1226', 72.11, 724.68, { size: 7 });
+    draw('(02) 8884-9999 / (02) 8841-8080', 72.11, 732.73, { size: 7 });
+    draw('www.medicardphils.com', 72.11, 740.78, { size: 7 });
 
-    line(w, `We hereby acknowledge the bill you submitted on ${todayIso} for processing.`);
-    line(w, 'However, we cannot process this bill at this time due to the following reason(s):');
-    blank(w);
-    line(w, REASON, { indent: 18 });
-    blank(w);
+    draw('ACTION MEMO', 262.55, 110.89, { bold: true, size: 12 });
 
-    line(w, 'We kindly request submission of the correct and complete information so that we can proceed');
-    line(w, 'with the processing of the claim.');
-    blank(w);
-    line(w, 'Please do not re-submit this bill until the required corrections or supporting documents have');
-    line(w, 'been provided. Kindly respond within two (2) weeks upon receipt of this memo.');
-    blank(w, 4);
+    // TO's yellow highlight box is sized to the sample's "JENNIFER EMPERADO"
+    // (142.7pt) in the real file — widened here to fit whichever doctor name
+    // is actually longer, so a long name isn't clipped by a fixed box.
+    const toWidth = Math.max(italic.widthOfTextAtSize(row.doctor, 11) + 4, 142.7);
+    page.drawRectangle({ x: 173.28, y: PAGE_HEIGHT - 154.26, width: toWidth, height: 12.73, color: rgb(1, 1, 0) });
 
-    line(w, 'Claims Processor', { indent: 180 });
-    blank(w, 2);
-    line(w, 'Noted by:');
-    blank(w);
-    line(w, 'Mark Ruzzel Quezada', { bold: true });
-    line(w, 'Claims Lead');
+    draw('TO', 72.11, 151.91, { bold: true });
+    draw(':', 154.35, 151.91);
+    draw(row.doctor, 173.40, 151.91, { italic: true });
+
+    draw('FROM', 72.11, 184.39, { bold: true });
+    draw(':', 154.35, 184.39);
+    draw('CLAIMS DEPARTMENT', 173.40, 184.39);
+
+    draw('SUBJECT', 72.11, 204.24, { bold: true });
+    draw(':', 154.35, 204.24);
+    draw(row.memberName, 173.40, 204.24);
+
+    draw('DATE', 72.11, 224.11, { bold: true });
+    draw(':', 154.35, 224.11);
+    draw(todayIso, 173.40, 224.11);
+
+    draw(`We hereby acknowledge the bill you submitted on ${todayIso} for processing.`, 72.11, 263.79);
+    draw('However, we cannot process this bill at this time due to the following reason(s):', 72.11, 283.64);
+    draw(REASON, 173.40, 303.93);
+
+    draw('We kindly request submission of the correct and complete information so that we can proceed ', 72.11, 343.98);
+    draw('with the processing of the claim.', 72.11, 359.80);
+
+    draw('Please do not re-submit this bill until the required corrections or supporting documents have ', 72.11, 391.41);
+    draw('been provided. Kindly respond within two (2) weeks upon receipt of this memo.', 72.11, 407.20);
+
+    draw('Claims Processor', 145.59, 505.19);
+
+    draw('Noted by:', 72.11, 544.90);
+    draw('Mark Ruzzel Quezada', 132.46, 584.59, { bold: true });
+    draw('Claims Lead', 158.15, 597.23);
 
     return doc.save();
 }
 
+// Coordinates/sizes measured directly off scripts/templates/DisapprovalMemo_sample.pdf.
 async function buildDisapprovalMemo(row: FailedRow, today: Date): Promise<Uint8Array> {
     const doc = await PDFDocument.create();
     const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-    const w: Writer = { page, font, bold, y: PAGE_HEIGHT - 60 };
+    const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+    const draw = makeDrawer(page, font, bold, italic);
 
     const todayLong = formatLongToday(today);
 
-    line(w, 'MediCard Philippines, Inc.', { bold: true, size: 12 });
-    line(w, 'Head Office: 8th Floor, The World Centre Building,', { size: 9 });
-    line(w, '330 Sen. Gil Puyat Avenue, Makati City 1200', { size: 9 });
-    line(w, 'Trunkline: 884-9999; Fax No. 864-0630; 864-0891', { size: 9 });
-    line(w, 'Website: www.medicardphils.com', { size: 9 });
-    blank(w, 1.5);
+    const logo = await embedAsset(doc, 'dm_logo.png');
+    page.drawImage(logo, { x: 42.75, y: PAGE_HEIGHT - 121.21, width: 82.46, height: 77.98 });
 
-    centered(w, 'DISAPPROVAL MEMO', { bold: true, size: 14 });
-    blank(w, 0.5);
+    const badge = await embedAsset(doc, 'dm_iso_badge.jpeg');
+    page.drawImage(badge, { x: 438.01, y: PAGE_HEIGHT - 119.93, width: 137.96, height: 53.97 });
 
-    line(w, `MEMO TO : ${row.doctor}`);
-    line(w, 'HOSPITAL : SeriousMD Telemedicine CLAIMS');
-    line(w, 'FROM : DEPARTMENT');
-    line(w, `SUBJECT : ${row.memberName}`);
-    line(w, `Inclusive Date of Availment: From ${row.visitDateSlash} To ___________`);
-    line(w, `DATE : ${todayLong}`);
-    line(w, 'REF NO : TEST');
-    blank(w);
+    draw('MediCard Philippines, Inc.', 132.01, 65.11, { bold: true, size: 9.1 });
+    draw('Head Office: ', 132.01, 80.11, { bold: true, size: 6.6 });
+    draw(' 8th Floor, The World Centre Building,', 174.84, 80.05, { size: 6.6 });
+    draw('330 Sen. Gil Puyat Avenue, Makati City 1200', 132.01, 89.80, { size: 6.6 });
+    draw('Trunkline: 884-9999; Fax No. 864-0630; 864-0891', 132.01, 99.55, { size: 6.6 });
+    draw('Website: www.medicardphils.com', 132.01, 109.30, { size: 6.6 });
 
-    line(w, `We hereby acknowledge the bills you have sent last ${row.visitDateSlash} with ${row.controlCode}.`);
-    line(w, 'However, we regret to inform you that the said bills has been disapproved due to the following reason(s):');
-    blank(w);
-    line(w, REASON, { indent: 18 });
-    blank(w, 2);
+    draw('DISAPPROVAL MEMO', 279.30, 189.95, { bold: true, size: 9 });
+    drawHLine(page, 52.19, 574.19, 197.23);
+    drawHLine(page, 52.19, 574.19, 330.24);
 
-    line(w, 'In view of the above, we are returning all documents which you have sent to us.');
-    line(w, 'For inquiries and clarification, please feel free to call us at 884-9999 local 9922 and 9919.');
-    blank(w, 2);
+    draw('MEMO TO', 72, 214.19, { size: 8.3 });
+    draw(':', 126, 214.19, { size: 8.3 });
+    draw(row.doctor, 141.73, 215.94, { italic: true, size: 11 });
 
-    line(w, 'Sincerely,');
-    blank(w, 3);
-    line(w, 'TEST', { indent: 180 });
-    line(w, 'Claims Processor', { indent: 180 });
-    blank(w, 2);
-    line(w, 'Noted by:');
-    blank(w, 3);
-    line(w, 'Cristina S. Cuevas, M.D.', { bold: true });
-    line(w, 'Claims Manager - Claims & Reimbursement');
+    draw('HOSPITAL   :', 72, 232.19, { size: 8.3 });
+    draw('SeriousMD Telemedicine CLAIMS', 144, 231.68, { size: 8.3 });
+
+    draw('FROM', 72, 250.19, { size: 8.3 });
+    draw(':', 126, 250.19, { size: 8.3 });
+    draw('DEPARTMENT', 144, 249.48, { size: 8.3 });
+
+    draw('SUBJECT', 72, 268.19, { size: 8.3 });
+    draw(':', 126, 268.19, { size: 8.3 });
+    draw(row.memberName, 144, 267.28, { size: 8.3 });
+
+    draw('Inclusive Date of Availment:', 144, 285.62, { size: 8.3 });
+    draw('From', 278.99, 286.19, { size: 8.3 });
+    draw(row.visitDateSlash, 306.00, 286.24, { size: 8.3 });
+    draw('To', 371.99, 286.19, { size: 8.3 });
+    drawHLine(page, 396, 483.02, 288.74); // blank "To ___" line
+
+    draw('DATE', 72, 304.19, { size: 8.3 });
+    draw(':', 126, 304.19, { size: 8.3 });
+    draw(todayLong, 144, 304.21, { size: 8.3 });
+
+    draw('REF NO', 72, 322.19, { size: 8.3 });
+    draw(':', 126, 322.19, { size: 8.3 });
+    draw('TEST', 144, 321.68, { size: 8.3 });
+
+    draw(`We hereby acknowledge the bills you have sent last ${row.visitDateSlash} with ${row.controlCode}.`, 72, 351.64, { size: 8.3 });
+    draw('However, we regret to inform you that the said bills has been disapproved due to the following reason(s):', 72, 370.18, { size: 8.3 });
+    draw(REASON, 78.01, 394.21, { bold: true, size: 8.3 });
+
+    draw('In view of the above, we are returning all documents which you have sent to us.', 73.19, 466.19, { size: 8.3 });
+    draw('For inquiries and clarification, please feel free to call us at 884-9999 local 9922 and 9919.', 74.69, 484.19, { size: 8.3 });
+
+    draw('Sincerely,', 72, 532.18, { size: 8.3 });
+    drawHLine(page, 77.98, 227.99, 562.73);
+    draw('TEST', 123.39, 573.68, { size: 8.3 });
+    draw('Claims Processor', 123.39, 585.64, { size: 8.3 });
+
+    draw('Noted by:', 67.21, 616.17, { size: 8.3 });
+    drawHLine(page, 77.98, 227.99, 642.25);
+    draw('Cristina S. Cuevas, M.D.', 109.05, 658.18, { size: 8.3 });
+    draw('Claims Manager - Claims & Reimbursement', 84.05, 676.15, { size: 8.3 });
 
     return doc.save();
 }
