@@ -34,3 +34,4 @@ playwright-report*.zip
 # suffix, last Document No.) — machine-specific, not shared.
 /scripts/.intake-sequence-state.json
 /scripts/.payment-journal-sequence-state.json
+/scripts/.return-file-sequence-state.json
