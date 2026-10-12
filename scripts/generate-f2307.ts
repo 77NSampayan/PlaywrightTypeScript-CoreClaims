@@ -93,9 +93,10 @@ export async function generateF2307(): Promise<void> {
     }
 
     for (const match of matches) {
-        // Use the matched row's actual doctor, not a fixed constant — ComCheck
-        // has two valid doctors, and whichever one this specific row has is
-        // what should appear as the Payee's Name.
+        // Use the matched row's actual doctor, not a fixed constant — keeps
+        // this correct even if ComCheck's valid-doctor list changes again;
+        // whichever one this specific row has is what should appear as the
+        // Payee's Name.
         const bytes = await buildF2307(match.doctor);
 
         const outPath = path.join(OUTPUT_DIR, `F2307_${match.controlCode}.pdf`);

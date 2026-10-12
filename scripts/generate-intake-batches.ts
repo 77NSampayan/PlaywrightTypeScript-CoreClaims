@@ -76,12 +76,14 @@ export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
 // files too) — the app looks the doctor up by this string, so a "cleaned
 // up" name would silently break the payment-mode routing.
 //
-// ComCheck has two valid doctors (per the real physician reference table) —
-// pickDoctor() rotates between them when generating new rows, and
-// isDoctorForMode() treats either as valid when matching existing rows.
+// ComCheck has exactly one valid doctor — VILLANUEVA, PURA CORAZON REYES.
+// JAN ROSLYN T. EMPINADO was removed per explicit instruction; the array
+// shape (rather than a single string) is kept for all three modes so
+// pickDoctor()/isDoctorForMode() stay generic if a mode ever needs more
+// than one again.
 export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string[]> = {
     DPS: ['TOMAS ANTONIO'],
-    COMCHECK: ['JAN ROSLYN T. EMPINADO ', 'VILLANUEVA, PURA CORAZON REYES'],
+    COMCHECK: ['VILLANUEVA, PURA CORAZON REYES'],
     UB: ['MA. TERESA VICTORIA LUCIA DIMAGIBA '],
 };
 
