@@ -21,13 +21,13 @@ playwright-report*.zip
 
 # Generated OPEML claim-upload test data (test-data/intake), generated
 # Payment Journal files (test-data/payment-journal), and any reference
-# OPEML*/*PAYMENT JOURNAL*.xlsx dropped at the repo root — regenerate via
+# OPEML*/*PAYMENT_JOURNAL*.xlsx dropped at the repo root — regenerate via
 # scripts/generate-intake-batches.ts / scripts/generate-payment-journal.ts
 # rather than committing; reference copies may carry real data and must
 # never be pushed.
 /test-data/
 /OPEML*.xlsx
-/*PAYMENT JOURNAL*.xlsx
+/*PAYMENT_JOURNAL*.xlsx
 /*-PF-IP-MS-EFT_COMCHECK*.xlsx
 
 # Local run-state for the generators (filename counters, last Transaction ID

@@ -41,8 +41,8 @@
 //     node scripts/generate-payment-journal.ts
 //
 // Output:
-//     test-data/payment-journal/DPS_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/payment-journal/UB_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
+//     test-data/payment-journal/DPS_PAYMENT_JOURNAL_<MM.DD.YY>.xlsx
+//     test-data/payment-journal/UB_PAYMENT_JOURNAL_<MM.DD.YY>.xlsx
 //     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_COMCHECK.xlsx
 
 import ExcelJS from 'exceljs';
@@ -336,7 +336,7 @@ export async function generatePaymentJournals(): Promise<void> {
         const documentNo = nextDocumentNo(paymentMode, state);
         const workbook = await buildJournalWorkbook(paymentMode, match.controlCode, documentNo, todayFormatted);
 
-        const outPath = path.join(OUTPUT_DIR, `${paymentMode}_PAYMENT JOURNAL_${dateStamp}.xlsx`);
+        const outPath = path.join(OUTPUT_DIR, `${paymentMode}_PAYMENT_JOURNAL_${dateStamp}.xlsx`);
         await workbook.xlsx.writeFile(outPath);
         console.log(`Wrote ${paymentMode} Payment Journal: ${outPath}`);
     }
