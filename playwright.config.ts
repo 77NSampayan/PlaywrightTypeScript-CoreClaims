@@ -157,12 +157,12 @@ export default defineConfig({
     // production endpoint, not a database connection).
     {
       name: 'api',
-      testMatch: /(IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload)\.spec\.ts/,
+      testMatch: /(IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
     },
 
     {
       name: 'msedge',
-      testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload)\.spec\.ts/,
+      testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
@@ -172,19 +172,19 @@ export default defineConfig({
 
     // {
     //   name: 'firefox',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
     //   use: { ...devices['Desktop Firefox'] },
     // },
 
     // {
     //   name: 'webkit',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
     //   use: { ...devices['Desktop Safari'] },
     // },
 
     // {
     //   name: 'chrome',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
     //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     // },
 

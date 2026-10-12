@@ -19,6 +19,7 @@ import path from 'path';
 const CONTENT_TYPES: Record<string, string> = {
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.pdf': 'application/pdf',
+    '.csv': 'text/csv',
 };
 
 export type BlobUploadResult = {
