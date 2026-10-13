@@ -31,8 +31,9 @@
 //
 // Usage:
 //     node scripts/generate-intake-batches.ts
+//     PAYMENT_MODE_FILTER=UB node scripts/generate-intake-batches.ts   # UB only
 //
-// Output (example, run on 2026-10-05, first run of the day):
+// Output (example, run on 2026-10-05, first run of the day, no filter):
 //     test-data/intake/OPEML2026100500001T.xlsx  (DPS,      negative)
 //     test-data/intake/OPEML2026100500002T.xlsx  (ComCheck, negative)
 //     test-data/intake/OPEML2026100500003T.xlsx  (UB,       negative)
@@ -70,6 +71,40 @@ const HEADERS = [
 ];
 
 export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
+export const ALL_PAYMENT_MODES: PaymentMode[] = ['DPS', 'COMCHECK', 'UB'];
+
+// Ad hoc "generate for one payment mode only" override, e.g.
+// PAYMENT_MODE_FILTER=UB — same reasoning as FAKE_TODAY above: not a
+// standing feature to rely on, defaults to every mode. Every generator that
+// loops over payment modes (intake batches, Payment Journal, Disbursement
+// File, F2307, claim memos) reads this via filterPaymentModes()/
+// matchesPaymentModeFilter() rather than its own copy of the env lookup.
+export function getPaymentModeFilter(): PaymentMode | null {
+    const override = process.env.PAYMENT_MODE_FILTER?.trim().toUpperCase();
+    if (!override) return null;
+    if (!ALL_PAYMENT_MODES.includes(override as PaymentMode)) {
+        throw new Error(`Invalid PAYMENT_MODE_FILTER "${override}" — expected one of ${ALL_PAYMENT_MODES.join(', ')}.`);
+    }
+    return override as PaymentMode;
+}
+
+// Narrows a list of modes to the active PAYMENT_MODE_FILTER, if any. Generic
+// over T (rather than just PaymentMode) so callers with a narrower mode
+// subset — e.g. generate-payment-journal.ts's JournalPaymentMode = 'DPS' |
+// 'UB' — get that same narrower type back, not the full PaymentMode union.
+export function filterPaymentModes<T extends PaymentMode>(modes: T[]): T[] {
+    const filter = getPaymentModeFilter();
+    return filter ? modes.filter((mode): mode is T => (mode as PaymentMode) === filter) : modes;
+}
+
+// True when `mode` should be generated under the active PAYMENT_MODE_FILTER
+// (i.e. no filter is set, or it matches) — for generators that are only
+// ever one fixed mode (F2307/Disbursement = ComCheck, Return File = DPS)
+// rather than looping over a list.
+export function matchesPaymentModeFilter(mode: PaymentMode): boolean {
+    const filter = getPaymentModeFilter();
+    return !filter || filter === mode;
+}
 
 // Doctor name(s) must match the live system's physician master data exactly,
 // including the trailing space on some of these (present in the reference
@@ -289,11 +324,12 @@ export async function generateIntakeBatches(): Promise<void> {
     // from wherever the last run left off.
     let counter = state.date === today ? state.lastCounter : 0;
 
-    const negativeBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const activeModes = filterPaymentModes(PAYMENT_MODE_ORDER);
+    const negativeBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });
-    const positiveBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const positiveBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });

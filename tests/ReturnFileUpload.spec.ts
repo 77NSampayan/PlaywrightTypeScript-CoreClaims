@@ -3,7 +3,7 @@ import { test } from '@fixtures/base.fixture.ts';
 import { test_credentials } from '@root/playwright.config.ts';
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { checkSasNotExpired, scopeToFolder, uploadFileToBlob } from '@utils/blobUpload.util.ts';
-import { generateReturnFile } from '../scripts/generate-return-file.ts';
+import { generateDpsReturnFile } from '../scripts/generate-return-file.ts';
 
 const RETURN_FILE_DIR = 'test-data/return-file';
 const RETURN_FILE_FOLDER = 'testblob/ReturnFile_OPTeleconsult/DPS';
@@ -19,7 +19,7 @@ async function listReturnFiles(): Promise<string[]> {
 
     files = files.filter((f) => f.toLowerCase().endsWith('.csv'));
     if (files.length === 0) {
-        await generateReturnFile();
+        await generateDpsReturnFile();
         files = (await readdir(RETURN_FILE_DIR)).filter((f) => f.toLowerCase().endsWith('.csv'));
     }
 
