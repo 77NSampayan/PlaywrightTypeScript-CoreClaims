@@ -42,10 +42,9 @@
 //     PAYMENT_MODE_FILTER=UB node scripts/generate-payment-journal.ts   # UB Payment Journal only, skips the ComCheck Disbursement File
 //
 // Output:
-//     test-data/payment-journal/DPS_PAYMENT_JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/payment-journal/UB_PAYMENT_JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_COMCHECK.xlsx       (first ComCheck row)
-//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_COMCHECK (1).xlsx   (2nd ComCheck row, etc.)
+//     test-data/payment-journal/DPS_PAYMENT_JOURNAL_01_<MM.DD.YY>.xlsx   (one per DPS Control Code found)
+//     test-data/payment-journal/UB_PAYMENT_JOURNAL_01_<MM.DD.YY>.xlsx    (one per UB Control Code found)
+//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_01_COMCHECK.xlsx    (one per ComCheck Control Code found)
 
 import ExcelJS from 'exceljs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
@@ -361,11 +360,11 @@ export async function generatePaymentJournals(): Promise<void> {
             const documentNo = nextDocumentNo(paymentMode, state);
             const workbook = await buildJournalWorkbook(paymentMode, match.controlCode, documentNo, todayFormatted);
 
-            // First file keeps the plain name; every one after gets a
-            // " (N)" suffix, same convention the Disbursement File uses for
-            // same-day duplicates.
-            const suffix = i === 0 ? '' : ` (${i})`;
-            const outPath = path.join(OUTPUT_DIR, `${paymentMode}_PAYMENT_JOURNAL_${dateStamp}${suffix}.xlsx`);
+            // 2-digit sequence number in the middle of the filename (not a
+            // trailing " (N)") for same-day duplicates, per explicit
+            // instruction — same convention the Disbursement File uses.
+            const seq = String(i + 1).padStart(2, '0');
+            const outPath = path.join(OUTPUT_DIR, `${paymentMode}_PAYMENT_JOURNAL_${seq}_${dateStamp}.xlsx`);
             await workbook.xlsx.writeFile(outPath);
             console.log(`Wrote ${paymentMode} Payment Journal: ${outPath}`);
         }
@@ -436,11 +435,10 @@ export async function generateDisbursementFile(): Promise<void> {
         const checkNo = nextCheckNo(todayCompact, state);
         const workbook = buildDisbursementWorkbook(checkNo, formatMmDdYyyy(today), match.controlCode);
 
-        // First file keeps the plain name; every one after gets a " (N)"
-        // suffix, same convention the real sample filenames themselves use
-        // for same-day duplicates (e.g. "...CNFHM (1).xlsx").
-        const suffix = i === 0 ? '' : ` (${i})`;
-        const outPath = path.join(DISBURSEMENT_OUTPUT_DIR, `${dateStamp}-PF-IP-MS-EFT_COMCHECK${suffix}.xlsx`);
+        // 2-digit sequence number in the middle of the filename (not a
+        // trailing " (N)") for same-day duplicates, per explicit instruction.
+        const seq = String(i + 1).padStart(2, '0');
+        const outPath = path.join(DISBURSEMENT_OUTPUT_DIR, `${dateStamp}-PF-IP-MS-EFT_${seq}_COMCHECK.xlsx`);
         await workbook.xlsx.writeFile(outPath);
         console.log(`Wrote ComCheck Disbursement File: ${outPath}`);
     }
