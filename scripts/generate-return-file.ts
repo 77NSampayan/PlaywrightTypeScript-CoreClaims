@@ -43,7 +43,10 @@
 //   - Remarks: the output filename itself, without the extension.
 //   - Remittance Type: fixed ("PESONet").
 //   - Currency: fixed ("PHP").
-//   - Transaction ID: "UBT1" + MMDDYY.
+//   - Transaction ID: "UBT1" + MMDDYY + the same 3-digit per-run counter
+//     used for Beneficiary Account Number — "UBT1<MMDDYY>" alone (the real
+//     sample's own shape) would repeat identically for every run on the
+//     same day, so it needed a counter to actually be unique, same as DPS's.
 //   - Batch ID: "<YYMMDD>-FT<DD>QLVY" — same DD/suffix shape as Line ID
 //     below (confirmed against the real sample: Batch ID "261014-FT14QLVY"
 //     and Line ID "261014-FT14QLVY-00001" share the same "FT14QLVY" for
@@ -82,7 +85,11 @@
 //
 // Both depend on test-data/intake/ already having a *passing* (Action Memo =
 // "N") OPEML row for the target payment mode — same self-healing precedent
-// as the Payment Journal/Disbursement/F2307 generators.
+// as the Payment Journal/Disbursement/F2307 generators. Unlike those,
+// though, this produces exactly one file per mode per run, not one per
+// Control Code — a Return File is keyed by doctor identity (email/mobile),
+// and each mode currently has exactly one doctor, so there's nothing to
+// multiply per claim.
 //
 // Usage:
 //     node scripts/generate-return-file.ts
@@ -348,9 +355,10 @@ export async function generateDpsReturnFile(): Promise<void> {
 
     await mkdir(OUTPUT_DIR, { recursive: true });
 
-    // Not "rows.length === 0" — test-data/intake/ can have rows from
-    // unrelated/stale files (a different doctor entirely) without having one
-    // for DPS specifically.
+    // Return File is keyed by doctor identity (email/mobile), not by claim —
+    // DPS has exactly one doctor, so only one file is needed per run, not
+    // one per Control Code the way Disbursement/Payment Journal/F2307 are
+    // (those represent a per-claim artifact; this doesn't).
     let passingRows = await readPassingRows();
     let match = passingRows.find((row) => isDoctorForMode(row.doctor, 'DPS'));
     if (!match) {
@@ -427,8 +435,9 @@ export async function generateUbReturnFile(): Promise<void> {
 
     await mkdir(OUTPUT_DIR, { recursive: true });
 
-    // Not "rows.length === 0" — same self-healing precedent as every other
-    // generator here.
+    // Return File is keyed by doctor identity, not by claim — UB has exactly
+    // one doctor, so only one file is needed per run, not one per Control
+    // Code (see generateDpsReturnFile()'s own note on why).
     let passingRows = await readPassingRows();
     let match = passingRows.find((row) => isDoctorForMode(row.doctor, 'UB'));
     if (!match) {
@@ -480,7 +489,11 @@ export async function generateUbReturnFile(): Promise<void> {
     setHeaderField(sheet, 9, 'Remarks', baseName);
     setHeaderField(sheet, 10, 'Remittance Type', UB_COMMON_FIELDS.remittanceType);
     setHeaderField(sheet, 11, 'Currency', UB_COMMON_FIELDS.currency);
-    setHeaderField(sheet, 12, 'Transaction ID', `UBT1${mmddyy(now)}`);
+    // "UBT1<MMDDYY>" alone (the real sample's own shape) repeats identically
+    // for every run on the same day — appending the same per-run counter
+    // already used for Beneficiary Account Number makes it actually unique,
+    // same reasoning as DPS's own persisted Transaction ID counter.
+    setHeaderField(sheet, 12, 'Transaction ID', `UBT1${mmddyy(now)}${accountSuffix}`);
     setHeaderField(sheet, 13, 'Batch ID', `${yymmdd(now)}-${batchIdSuffix}`);
 
     const detailsLabel = sheet.getCell(15, 1);
