@@ -39,6 +39,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { getPaymentModeFilter, isDoctorForMode } from './generate-intake-batches.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
@@ -315,9 +316,15 @@ async function buildDisapprovalMemo(row: FailedRow, today: Date): Promise<Uint8A
 export async function generateClaimMemos(): Promise<void> {
     await mkdir(MEMO_DIR, { recursive: true });
 
-    const failedRows = await readFailedRows();
+    const filter = getPaymentModeFilter();
+    let failedRows = await readFailedRows();
+    if (filter) {
+        failedRows = failedRows.filter((row) => isDoctorForMode(row.doctor, filter));
+    }
+
     if (failedRows.length === 0) {
-        console.log('No Action Memo = "Y" rows found under test-data/intake/ — run generate-intake-batches.ts first.');
+        const scope = filter ? `Action Memo = "Y" rows for ${filter}` : 'Action Memo = "Y" rows';
+        console.log(`No ${scope} found under test-data/intake/ — run generate-intake-batches.ts first.`);
         return;
     }
 
