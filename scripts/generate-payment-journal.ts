@@ -77,7 +77,7 @@ const PAYMENT_MODES: JournalPaymentMode[] = ['DPS', 'UB'];
 
 const DOCUMENT_NO_PREFIX: Record<JournalPaymentMode, string> = {
     DPS: 'CV-REGDPS-01-',
-    UB: 'CV-EXPECR-01-',
+    UB: 'CV-REGECR-01-',
 };
 
 // "new BOL Type" column value — not always the same string as the payment
