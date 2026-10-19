@@ -1,11 +1,13 @@
 // Generates OPEML claim-upload test data for the three payment modes (DPS,
 // ComCheck, UB/UnionBank), as two batches:
 //
-//   - NEGATIVE batch (first 3 files): every row has Action Memo = "Y" and
-//     blank Diagnosis/Dx Code, so the upload is expected to fail.
+//   - NEGATIVE batch (first 3 files): 2 rows each — the 1st row is complete
+//     and passing (Action Memo = "N"), and only the 2nd row is the
+//     deliberate failure (blank Diagnosis/Dx Code, Action Memo = "Y"). Not
+//     every row in the file fails.
 //   - POSITIVE batch (next 3 files): same doctor-per-payment-mode mapping
-//     and column structure, but complete fields (Action Memo = "N",
-//     Diagnosis/Dx Code filled in) and different patients.
+//     and column structure, but every row is complete (Action Memo = "N",
+//     Diagnosis/Dx Code filled in) and uses different patients.
 //
 // Filenames are OPEML<today's date, YYYYMMDD><5-digit running counter>T —
 // the counter continues across runs on the same day (persisted in
@@ -29,8 +31,9 @@
 //
 // Usage:
 //     node scripts/generate-intake-batches.ts
+//     PAYMENT_MODE_FILTER=UB node scripts/generate-intake-batches.ts   # UB only
 //
-// Output (example, run on 2026-10-05, first run of the day):
+// Output (example, run on 2026-10-05, first run of the day, no filter):
 //     test-data/intake/OPEML2026100500001T.xlsx  (DPS,      negative)
 //     test-data/intake/OPEML2026100500002T.xlsx  (ComCheck, negative)
 //     test-data/intake/OPEML2026100500003T.xlsx  (UB,       negative)
@@ -68,18 +71,54 @@ const HEADERS = [
 ];
 
 export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
+export const ALL_PAYMENT_MODES: PaymentMode[] = ['DPS', 'COMCHECK', 'UB'];
+
+// Ad hoc "generate for one payment mode only" override, e.g.
+// PAYMENT_MODE_FILTER=UB — same reasoning as FAKE_TODAY above: not a
+// standing feature to rely on, defaults to every mode. Every generator that
+// loops over payment modes (intake batches, Payment Journal, Disbursement
+// File, F2307, claim memos) reads this via filterPaymentModes()/
+// matchesPaymentModeFilter() rather than its own copy of the env lookup.
+export function getPaymentModeFilter(): PaymentMode | null {
+    const override = process.env.PAYMENT_MODE_FILTER?.trim().toUpperCase();
+    if (!override) return null;
+    if (!ALL_PAYMENT_MODES.includes(override as PaymentMode)) {
+        throw new Error(`Invalid PAYMENT_MODE_FILTER "${override}" — expected one of ${ALL_PAYMENT_MODES.join(', ')}.`);
+    }
+    return override as PaymentMode;
+}
+
+// Narrows a list of modes to the active PAYMENT_MODE_FILTER, if any. Generic
+// over T (rather than just PaymentMode) so callers with a narrower mode
+// subset — e.g. generate-payment-journal.ts's JournalPaymentMode = 'DPS' |
+// 'UB' — get that same narrower type back, not the full PaymentMode union.
+export function filterPaymentModes<T extends PaymentMode>(modes: T[]): T[] {
+    const filter = getPaymentModeFilter();
+    return filter ? modes.filter((mode): mode is T => (mode as PaymentMode) === filter) : modes;
+}
+
+// True when `mode` should be generated under the active PAYMENT_MODE_FILTER
+// (i.e. no filter is set, or it matches) — for generators that are only
+// ever one fixed mode (F2307/Disbursement = ComCheck, Return File = DPS)
+// rather than looping over a list.
+export function matchesPaymentModeFilter(mode: PaymentMode): boolean {
+    const filter = getPaymentModeFilter();
+    return !filter || filter === mode;
+}
 
 // Doctor name(s) must match the live system's physician master data exactly,
 // including the trailing space on some of these (present in the reference
 // files too) — the app looks the doctor up by this string, so a "cleaned
 // up" name would silently break the payment-mode routing.
 //
-// ComCheck has two valid doctors (per the real physician reference table) —
-// pickDoctor() rotates between them when generating new rows, and
-// isDoctorForMode() treats either as valid when matching existing rows.
+// ComCheck has exactly one valid doctor — VILLANUEVA, PURA CORAZON REYES.
+// JAN ROSLYN T. EMPINADO was removed per explicit instruction; the array
+// shape (rather than a single string) is kept for all three modes so
+// pickDoctor()/isDoctorForMode() stay generic if a mode ever needs more
+// than one again.
 export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string[]> = {
     DPS: ['TOMAS ANTONIO'],
-    COMCHECK: ['JAN ROSLYN T. EMPINADO ', 'VILLANUEVA, PURA CORAZON REYES'],
+    COMCHECK: ['VILLANUEVA, PURA CORAZON REYES'],
     UB: ['MA. TERESA VICTORIA LUCIA DIMAGIBA '],
 };
 
@@ -220,9 +259,14 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
     const doctor = pickDoctor(paymentMode);
 
     patients.forEach((patient, i) => {
-        const diagnosis = negative ? '' : SAMPLE_DIAGNOSIS.diagnosis;
-        const dxCode = negative ? '' : SAMPLE_DIAGNOSIS.dxCode;
-        const actionMemo = negative ? 'Y' : 'N';
+        // In a negative-batch file, only the 2nd row is the deliberate
+        // failure (blank Diagnosis/Dx Code, Action Memo = "Y") — the 1st row
+        // is complete and passing, so the file isn't "every row fails."
+        // Positive batches are unaffected: every row stays complete/"N".
+        const rowFails = negative && i > 0;
+        const diagnosis = rowFails ? '' : SAMPLE_DIAGNOSIS.diagnosis;
+        const dxCode = rowFails ? '' : SAMPLE_DIAGNOSIS.dxCode;
+        const actionMemo = rowFails ? 'Y' : 'N';
 
         sheet.addRow([
             patient.memberCode,
@@ -280,11 +324,12 @@ export async function generateIntakeBatches(): Promise<void> {
     // from wherever the last run left off.
     let counter = state.date === today ? state.lastCounter : 0;
 
-    const negativeBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const activeModes = filterPaymentModes(PAYMENT_MODE_ORDER);
+    const negativeBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });
-    const positiveBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const positiveBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });

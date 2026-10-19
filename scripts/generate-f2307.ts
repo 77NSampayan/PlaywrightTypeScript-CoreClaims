@@ -30,7 +30,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { generateIntakeBatches, isDoctorForMode } from './generate-intake-batches.ts';
+import { generateIntakeBatches, isDoctorForMode, matchesPaymentModeFilter } from './generate-intake-batches.ts';
 import { readFailedRows } from './generate-claim-memos.ts';
 import { readPassingRows } from './generate-payment-journal.ts';
 
@@ -77,6 +77,11 @@ async function findComcheckRows(): Promise<{ controlCode: string; doctor: string
 }
 
 export async function generateF2307(): Promise<void> {
+    if (!matchesPaymentModeFilter('COMCHECK')) {
+        console.log('PAYMENT_MODE_FILTER excludes ComCheck — skipping F2307 (ComCheck-only).');
+        return;
+    }
+
     await mkdir(OUTPUT_DIR, { recursive: true });
 
     let matches = await findComcheckRows();
@@ -93,9 +98,10 @@ export async function generateF2307(): Promise<void> {
     }
 
     for (const match of matches) {
-        // Use the matched row's actual doctor, not a fixed constant — ComCheck
-        // has two valid doctors, and whichever one this specific row has is
-        // what should appear as the Payee's Name.
+        // Use the matched row's actual doctor, not a fixed constant — keeps
+        // this correct even if ComCheck's valid-doctor list changes again;
+        // whichever one this specific row has is what should appear as the
+        // Payee's Name.
         const bytes = await buildF2307(match.doctor);
 
         const outPath = path.join(OUTPUT_DIR, `F2307_${match.controlCode}.pdf`);
