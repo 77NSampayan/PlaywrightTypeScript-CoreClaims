@@ -17,6 +17,10 @@ variables:
   # Force playwright.config.ts into CI mode (headless, forbidOnly, retries).
   - name: CI
     value: 'true'
+  # npm's download cache, moved under the pipeline workspace so the Cache@2
+  # step below can save and restore it between runs.
+  - name: npm_config_cache
+    value: $(Pipeline.Workspace)/.npm
 
 # Manual trigger only (matches GitHub's workflow_dispatch). No CI/PR auto-runs.
 trigger: none
@@ -27,12 +31,13 @@ name: ${{ parameters.project }}
 
 parameters:
   - name: project
-    displayName: Project to run (db = Database.spec.ts, no browser)
+    displayName: Project to run (db = Database.spec.ts, no browser; api = *Upload specs; msedge = browser suite; all = every project)
     type: string
-    default: chrome
+    default: msedge
     values:
       - db
-      - chrome
+      - api
+      - msedge
       - all
   - name: grep
     displayName: 'Only run tests whose title matches (Playwright -g). Leave blank to run all.'
@@ -56,24 +61,38 @@ jobs:
         displayName: Setup Node.js
         inputs:
           versionSpec: '20.x'
-        # No npm cache here: this repo keeps no committed lockfile, and caching
-        # without one fails ("lock file is not found").
 
-      - script: npm install
+      # Keyed on the committed package-lock.json: a lockfile change busts the
+      # cache; otherwise npm ci installs from the restored download cache.
+      - task: Cache@2
+        displayName: Cache npm downloads
+        inputs:
+          key: 'npm | "$(Agent.OS)" | package-lock.json'
+          restoreKeys: |
+            npm | "$(Agent.OS)"
+          path: $(npm_config_cache)
+
+      - script: npm ci
         displayName: Install dependencies
-        # npm install (not npm ci) because there is no package-lock.json to install from.
+        # npm ci, not npm install: installs exactly what package-lock.json pins and
+        # fails if it is out of sync with package.json, rather than silently resolving.
 
-      # Install only what the selected project needs:
-      #  - db      : no browser at all
-      #  - firefox / webkit : Playwright-managed engines; --with-deps pulls the
-      #                       system libraries they need on Linux
-      #  - chrome  : Google Chrome is preinstalled on the ubuntu-latest image
+      # Install only what the selected project needs (--with-deps pulls the
+      # system libraries the engine needs on Linux):
+      #  - db     : no browser at all
+      #  - api    : *Upload specs open the Azure Portal in Playwright's bundled
+      #             Chromium (no `channel`), AND depend on the `setup` project,
+      #             which signs in on `channel: 'msedge'` — so both are needed
+      #  - msedge : the project pins `channel: 'msedge'`, so install the Edge channel
+      #             (its `setup` dependency uses Edge too)
+      #  - all    : runs db + api + msedge, so install both chromium and msedge
       - bash: |
           set -e
           case "$PROJECT" in
             db)     echo 'db project uses no browser - skipping browser install.' ;;
-            chrome) echo 'chrome uses the preinstalled Google Chrome on the agent - skipping install.' ;;
-            all)    npx playwright install --with-deps firefox webkit ;;
+            api)    npx playwright install --with-deps chromium msedge ;;
+            msedge) npx playwright install --with-deps msedge ;;
+            all)    npx playwright install --with-deps chromium msedge ;;
             *)      npx playwright install --with-deps "$PROJECT" ;;
           esac
         displayName: Install Playwright browser
@@ -100,6 +119,16 @@ jobs:
           VALID_USERNAME_1: $(NEM_EMAIL)
           VALID_PASSWORD_1: $(NEM_PASSWORD)
           VALID_OTP_SECRET_1: $(NEM_OTP_SECRET)
+          # Extra test accounts — each one adds a parallel worker (workers = number
+          # of accounts, see playwright.config.ts). Uncomment ONLY once the variables
+          # exist in the group: ADO passes an undefined $(VAR) through as the literal
+          # text "$(VAR)", which the config would read as a real username.
+          # VALID_USERNAME_2: $(ACCOUNT_2_EMAIL)
+          # VALID_PASSWORD_2: $(ACCOUNT_2_PASSWORD)
+          # VALID_OTP_SECRET_2: $(ACCOUNT_2_OTP_SECRET)
+          # VALID_USERNAME_3: $(ACCOUNT_3_EMAIL)
+          # VALID_PASSWORD_3: $(ACCOUNT_3_PASSWORD)
+          # VALID_OTP_SECRET_3: $(ACCOUNT_3_OTP_SECRET)
           # DB-backed specs (db project). data_enrichment vars exist; the Membership
           # test also needs MEMBERSHIP_DB_* — add those to the group or it fails at connect.
           DATA_ENRICHMENT_DB_SERVER: $(DATA_ENRICHMENT_DB_SERVER)
@@ -114,10 +143,30 @@ jobs:
           MEMBERSHIP_DB_PORT: $(MEMBERSHIP_DB_PORT)
           LOG_LEVEL: $(LOG_LEVEL)
 
+      # Guard the HTML upload: Playwright writes playwright-report/ even when tests
+      # FAIL, but NOT when the run errors before any test executes (bad config,
+      # failed browser install). PublishPipelineArtifact hard-fails on a missing
+      # path, so check first and skip cleanly - mirrors the Allure step's own guard.
+      - bash: |
+          if [ -d playwright-report ]; then
+            echo '##vso[task.setvariable variable=htmlReportExists]true'
+          else
+            echo 'No playwright-report/ produced (run errored before any test?) - skipping HTML report upload.'
+            echo '##vso[task.setvariable variable=htmlReportExists]false'
+          fi
+        displayName: Check for Playwright HTML report
+        condition: not(canceled())
+
       # Upload the HTML report whether the run passed or failed, so failures are debuggable.
+      # PII: on failure this report carries a screenshot of the authenticated page. Traces
+      # (full DOM/network, the richest PII) are excluded entirely under CI by
+      # playwright.config.ts — see its `trace` note. PublishPipelineArtifact@1 has NO
+      # per-artifact retention input, so the exposure window is governed by the pipeline's
+      # run-retention policy: set it to the minimum in ADO project settings
+      # (Project Settings → Pipelines → Settings → Retention).
       - task: PublishPipelineArtifact@1
         displayName: Upload Playwright HTML report
-        condition: not(canceled())
+        condition: and(not(canceled()), eq(variables.htmlReportExists, 'true'))
         inputs:
           targetPath: playwright-report
           artifact: playwright-report-${{ parameters.project }}
@@ -131,6 +180,9 @@ jobs:
       # project) and copied back into allure-results/ before generating.
       - bash: |
           set -e
+          # Default to "no report" so the upload step is skipped unless we actually
+          # generate one below (mirrors the HTML report's htmlReportExists guard).
+          echo '##vso[task.setvariable variable=allureReportExists]false'
           if [ ! -d allure-results ]; then
             echo 'No allure-results produced (no tests ran?) - skipping Allure report.'
             exit 0
@@ -171,6 +223,8 @@ jobs:
           # global `allure` on the agent: that one may be Allure 3, whose CLI dropped
           # `--clean` and the positional results dir, so this command fails to parse.
           npx allure generate allure-results --clean -o allure-report
+          # Report generated successfully - allow the upload step to run.
+          echo '##vso[task.setvariable variable=allureReportExists]true'
 
           # Stash this run's freshly generated history for the next run's trends.
           if [ -d allure-report/history ]; then
@@ -190,9 +244,12 @@ jobs:
           BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
           REPO_URL: $(Build.Repository.Uri)
 
+      # Same PII reasoning as the HTML report upload above: on failure the Allure report
+      # embeds the page screenshot (no traces under CI). Retention is governed by the
+      # pipeline run-retention policy — set it to the minimum in ADO project settings.
       - task: PublishPipelineArtifact@1
         displayName: Upload Allure report
-        condition: not(canceled())
+        condition: and(not(canceled()), eq(variables.allureReportExists, 'true'))
         inputs:
           targetPath: allure-report
           artifact: allure-report-${{ parameters.project }}

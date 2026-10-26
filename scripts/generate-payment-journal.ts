@@ -8,8 +8,8 @@
 //     10.06.26-PF-IP-MS-EFT_CNFHM (1).xlsx (6-column schema: check_no,
 //     check_date, d_code, ctlno, found rec, bank).
 //
-// Both depend on test-data/intake/ already having a *passing* (Action Memo =
-// "N") OPEML row for the target payment mode — "Reference Control No." /
+// Both depend on the target payment mode's channel folder already having a
+// *passing* (Action Memo = "N") OPEML row — "Reference Control No." /
 // "ctlno" references that row's Control Code. Confirmed against the real UB
 // Payment Journal template: its Reference Control No. (OPEML2026100600433T)
 // is one of our own previously-generated positive-batch control codes, not a
@@ -39,23 +39,22 @@
 //
 // Usage:
 //     node scripts/generate-payment-journal.ts
+//     PAYMENT_MODE_FILTER=UB node scripts/generate-payment-journal.ts   # UB Payment Journal only, skips the ComCheck Disbursement File
 //
-// Output:
-//     test-data/payment-journal/DPS_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/payment-journal/UB_PAYMENT JOURNAL_<MM.DD.YY>.xlsx
-//     test-data/disbursement/<MM.DD.YY>-PF-IP-MS-EFT_COMCHECK.xlsx
+// Output (written into the same channel/date folder as the intake row it
+// references, alongside it — not a separate shared folder):
+//     test-data/DPS/<MM.DD.YY>/DPS_PAYMENT_JOURNAL_01_<MM.DD.YY>.xlsx       (one per DPS Control Code found)
+//     test-data/UB/<MM.DD.YY>/UB_PAYMENT_JOURNAL_01_<MM.DD.YY>.xlsx        (one per UB Control Code found)
+//     test-data/COM CHECK/<MM.DD.YY>/<MM.DD.YY>-PF-IP-MS-EFT_01_COMCHECK.xlsx  (one per ComCheck Control Code found)
 
 import ExcelJS from 'exceljs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { generateIntakeBatches, isDoctorForMode } from './generate-intake-batches.ts';
+import { ALL_PAYMENT_MODES, filterPaymentModes, formatDateFolder, generateIntakeBatches, getChannelDir, isIntakeFilename, matchesPaymentModeFilter, type PaymentMode } from './generate-intake-batches.ts';
+import { readFailedRows } from './generate-claim-memos.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.dirname(__dirname);
-const INTAKE_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
-const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'payment-journal');
-const DISBURSEMENT_OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'disbursement');
 const STATE_FILE = path.join(__dirname, '.payment-journal-sequence-state.json');
 
 // Ad hoc "generate as if it were a different day" override (e.g. preparing
@@ -75,7 +74,7 @@ const PAYMENT_MODES: JournalPaymentMode[] = ['DPS', 'UB'];
 
 const DOCUMENT_NO_PREFIX: Record<JournalPaymentMode, string> = {
     DPS: 'CV-REGDPS-01-',
-    UB: 'CV-EXPECR-01-',
+    UB: 'CV-REGECR-01-',
 };
 
 // "new BOL Type" column value — not always the same string as the payment
@@ -130,7 +129,7 @@ const COMMON_FIELDS = {
     sentToLegacy: 'Yes',
     accountNo: '00000000', // placeholder — real sample's value looked bank-account-shaped
     messageToRecipient: 'Claims Payment', // placeholder — real sample's actual text wasn't readable/safe to copy
-    amount: 997.5,
+    amount: 270, // per explicit instruction
     appliesToDocNo: 'PPI-0003696957',
 };
 
@@ -178,13 +177,6 @@ async function saveState(state: SequenceState): Promise<void> {
     await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
-function formatMmDdYy(date: Date): string {
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const year = String(date.getFullYear()).slice(-2);
-    return `${month}.${day}.${year}`;
-}
-
 // Posting Date / Applies-to Doc. Due Date — plain "MM/DD/YYYY" text, not a
 // native Excel date (the real reference files stored these as datetimes,
 // but the requested format here is the slash-separated string).
@@ -194,44 +186,50 @@ function formatMmDdYyyy(date: Date): string {
     return `${month}/${day}/${date.getFullYear()}`;
 }
 
-export type PassingRow = { controlCode: string; doctor: string };
+export type PassingRow = { controlCode: string; doctor: string; paymentMode: PaymentMode };
 
 // Mirrors generate-claim-memos.ts's readFailedRows(), but for the opposite
 // case: rows NOT tagged Action Memo = "Y" — i.e. claims that passed and are
 // now eligible to actually be paid, which is what a Payment Journal entry
-// represents.
+// represents. Scans every channel's own folder for today's date, same as
+// readFailedRows().
 export async function readPassingRows(): Promise<PassingRow[]> {
     const rows: PassingRow[] = [];
 
-    let dirEntries: string[];
-    try {
-        dirEntries = await readdir(INTAKE_DIR);
-    } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return rows;
-        throw err;
-    }
-    const files = dirEntries.filter((f) => f.toLowerCase().endsWith('.xlsx'));
+    for (const paymentMode of ALL_PAYMENT_MODES) {
+        const channelDir = getChannelDir(paymentMode);
 
-    for (const file of files) {
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(path.join(INTAKE_DIR, file));
-        const sheet = workbook.worksheets[0];
-        if (!sheet) continue;
+        let dirEntries: string[];
+        try {
+            dirEntries = await readdir(channelDir);
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+            throw err;
+        }
+        const files = dirEntries.filter(isIntakeFilename);
 
-        sheet.eachRow((row, rowNumber) => {
-            if (rowNumber === 1) return; // header
+        for (const file of files) {
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.readFile(path.join(channelDir, file));
+            const sheet = workbook.worksheets[0];
+            if (!sheet) continue;
 
-            const actionMemo = String(row.getCell(20).value ?? '').trim(); // "Action Memo"
-            if (actionMemo === 'Y') return; // only passing rows
+            sheet.eachRow((row, rowNumber) => {
+                if (rowNumber === 1) return; // header
 
-            const controlCode = String(row.getCell(14).value ?? '').trim(); // "Control Code"
-            if (!controlCode) return;
+                const actionMemo = String(row.getCell(20).value ?? '').trim(); // "Action Memo"
+                if (actionMemo === 'Y') return; // only passing rows
 
-            rows.push({
-                controlCode,
-                doctor: String(row.getCell(6).value ?? '').trim(), // "Doctor"
+                const controlCode = String(row.getCell(14).value ?? '').trim(); // "Control Code"
+                if (!controlCode) return;
+
+                rows.push({
+                    controlCode,
+                    doctor: String(row.getCell(6).value ?? '').trim(), // "Doctor"
+                    paymentMode,
+                });
             });
-        });
+        }
     }
 
     return rows;
@@ -307,38 +305,66 @@ async function buildJournalWorkbook(
     return workbook;
 }
 
+async function findRowsForJournal(mode: JournalPaymentMode): Promise<PassingRow[]> {
+    const [passing, failed] = await Promise.all([readPassingRows(), readFailedRows()]);
+    const rows = [...passing, ...failed].filter((row) => row.paymentMode === mode);
+
+    // A single OPEML file can carry more than one row for the same claim —
+    // dedupe by Control Code so each one only produces one Payment Journal
+    // entry, not "per raw spreadsheet row."
+    const seen = new Set<string>();
+    return rows.filter((row) => (seen.has(row.controlCode) ? false : (seen.add(row.controlCode), true)));
+}
+
 export async function generatePaymentJournals(): Promise<void> {
-    await mkdir(OUTPUT_DIR, { recursive: true });
+    const activeModes = filterPaymentModes(PAYMENT_MODES);
+    if (activeModes.length === 0) {
+        console.log(`PAYMENT_MODE_FILTER excludes both Payment Journal modes (${PAYMENT_MODES.join('/')}) — skipping.`);
+        return;
+    }
 
-    // Not "passingRows.length === 0" — test-data/intake/ can have rows from
-    // unrelated/stale files (a different doctor entirely) without having
-    // one for every payment mode this needs.
-    let passingRows = await readPassingRows();
-    const hasAllDoctors = (rows: PassingRow[]) =>
-        PAYMENT_MODES.every((mode) => rows.some((row) => isDoctorForMode(row.doctor, mode)));
-
-    if (!hasAllDoctors(passingRows)) {
+    // Not "rows.length === 0" for any one mode — check every active mode up
+    // front and self-heal at most once, rather than once per mode (calling
+    // generateIntakeBatches() per mode in a loop would generate a whole
+    // extra day-batch for every mode that was missing, not just the first).
+    const matchesByMode = new Map<JournalPaymentMode, PassingRow[]>();
+    const loadMatches = async () => {
+        for (const mode of activeModes) {
+            matchesByMode.set(mode, await findRowsForJournal(mode));
+        }
+    };
+    await loadMatches();
+    if (activeModes.some((mode) => matchesByMode.get(mode)!.length === 0)) {
         await generateIntakeBatches();
-        passingRows = await readPassingRows();
+        await loadMatches();
     }
 
     const state = await loadState();
     const today = getToday();
-    const dateStamp = formatMmDdYy(today);
+    const dateStamp = formatDateFolder(today);
     const todayFormatted = formatMmDdYyyy(today);
 
-    for (const paymentMode of PAYMENT_MODES) {
-        const match = passingRows.find((row) => isDoctorForMode(row.doctor, paymentMode));
-        if (!match) {
-            throw new Error(`No passing OPEML row found for ${paymentMode} — nothing to reference.`);
+    for (const paymentMode of activeModes) {
+        const matches = matchesByMode.get(paymentMode)!;
+        if (matches.length === 0) {
+            throw new Error(`No OPEML row found for ${paymentMode} — nothing to reference.`);
         }
 
-        const documentNo = nextDocumentNo(paymentMode, state);
-        const workbook = await buildJournalWorkbook(paymentMode, match.controlCode, documentNo, todayFormatted);
+        const outDir = getChannelDir(paymentMode, today);
+        await mkdir(outDir, { recursive: true });
 
-        const outPath = path.join(OUTPUT_DIR, `${paymentMode}_PAYMENT JOURNAL_${dateStamp}.xlsx`);
-        await workbook.xlsx.writeFile(outPath);
-        console.log(`Wrote ${paymentMode} Payment Journal: ${outPath}`);
+        for (const [i, match] of matches.entries()) {
+            const documentNo = nextDocumentNo(paymentMode, state);
+            const workbook = await buildJournalWorkbook(paymentMode, match.controlCode, documentNo, todayFormatted);
+
+            // 2-digit sequence number in the middle of the filename (not a
+            // trailing " (N)") for same-day duplicates, per explicit
+            // instruction — same convention the Disbursement File uses.
+            const seq = String(i + 1).padStart(2, '0');
+            const outPath = path.join(outDir, `${paymentMode}_PAYMENT_JOURNAL_${seq}_${dateStamp}.xlsx`);
+            await workbook.xlsx.writeFile(outPath);
+            console.log(`Wrote ${paymentMode} Payment Journal: ${outPath}`);
+        }
     }
 
     await saveState(state);
@@ -361,36 +387,57 @@ function buildDisbursementWorkbook(checkNo: string, checkDateFormatted: string, 
     return workbook;
 }
 
-// ComCheck's "positive scenario" artifact — a Disbursement File, not a
-// Payment Journal (different template entirely, see the header comment).
-export async function generateDisbursementFile(): Promise<void> {
-    await mkdir(DISBURSEMENT_OUTPUT_DIR, { recursive: true });
+async function findComcheckRowsForDisbursement(): Promise<PassingRow[]> {
+    const [passing, failed] = await Promise.all([readPassingRows(), readFailedRows()]);
+    const comcheckRows = [...passing, ...failed].filter((row) => row.paymentMode === 'COMCHECK');
 
-    // Not "passingRows.length === 0" — test-data/intake/ can have rows from
-    // unrelated/stale files (a different doctor entirely) without having
-    // one for COMCHECK specifically.
-    let passingRows = await readPassingRows();
-    let match = passingRows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
-    if (!match) {
-        await generateIntakeBatches();
-        passingRows = await readPassingRows();
-        match = passingRows.find((row) => isDoctorForMode(row.doctor, 'COMCHECK'));
+    // A single OPEML file can carry more than one row for the same claim —
+    // dedupe by Control Code so each one only produces one Disbursement File.
+    const seen = new Set<string>();
+    return comcheckRows.filter((row) => (seen.has(row.controlCode) ? false : (seen.add(row.controlCode), true)));
+}
+
+// ComCheck's Disbursement File — not a Payment Journal (different template
+// entirely, see the header comment). One file per ComCheck claim currently
+// in its channel folder, covering both the passing and failing batch — not
+// just the first passing match (a Disbursement File is a check record tied
+// to a transaction, same reasoning as F2307's own multi-row fix).
+export async function generateDisbursementFile(): Promise<void> {
+    if (!matchesPaymentModeFilter('COMCHECK')) {
+        console.log('PAYMENT_MODE_FILTER excludes ComCheck — skipping the Disbursement File.');
+        return;
     }
 
-    if (!match) {
-        throw new Error('No passing OPEML row found for COMCHECK — nothing to reference.');
+    // Not "rows.length === 0" — other channels can have rows (a different
+    // payment mode entirely) without having one for COMCHECK specifically.
+    let matches = await findComcheckRowsForDisbursement();
+    if (matches.length === 0) {
+        await generateIntakeBatches();
+        matches = await findComcheckRowsForDisbursement();
+    }
+
+    if (matches.length === 0) {
+        throw new Error('No OPEML row found for COMCHECK — nothing to reference.');
     }
 
     const state = await loadState();
     const today = getToday();
     const todayCompact = todayYyyyMmDd();
+    const dateStamp = formatDateFolder(today);
+    const outDir = getChannelDir('COMCHECK', today);
+    await mkdir(outDir, { recursive: true });
 
-    const checkNo = nextCheckNo(todayCompact, state);
-    const workbook = buildDisbursementWorkbook(checkNo, formatMmDdYyyy(today), match.controlCode);
+    for (const [i, match] of matches.entries()) {
+        const checkNo = nextCheckNo(todayCompact, state);
+        const workbook = buildDisbursementWorkbook(checkNo, formatMmDdYyyy(today), match.controlCode);
 
-    const outPath = path.join(DISBURSEMENT_OUTPUT_DIR, `${formatMmDdYy(today)}-PF-IP-MS-EFT_COMCHECK.xlsx`);
-    await workbook.xlsx.writeFile(outPath);
-    console.log(`Wrote ComCheck Disbursement File: ${outPath}`);
+        // 2-digit sequence number in the middle of the filename (not a
+        // trailing " (N)") for same-day duplicates, per explicit instruction.
+        const seq = String(i + 1).padStart(2, '0');
+        const outPath = path.join(outDir, `${dateStamp}-PF-IP-MS-EFT_${seq}_COMCHECK.xlsx`);
+        await workbook.xlsx.writeFile(outPath);
+        console.log(`Wrote ComCheck Disbursement File: ${outPath}`);
+    }
 
     await saveState(state);
 }

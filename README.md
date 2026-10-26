@@ -37,6 +37,7 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    | `VALID_USERNAME_1` | always | Microsoft SSO test account |
    | `VALID_PASSWORD_1` | always | Password for that account |
    | `VALID_OTP_SECRET_1` | only for the SSO login spec's MFA step | TOTP seed for the account's authenticator |
+   | `VALID_USERNAME_n` / `VALID_PASSWORD_n` / `VALID_OTP_SECRET_n` (n = 2, 3, …) | no | Extra test accounts, read until the first missing `VALID_USERNAME_n`. Each account is bound to one parallel worker, so the run uses as many workers as accounts. |
    | `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
    | `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `membershipDbConnection`-backed specs | Separate server/credentials from the DB above. Same read-only-account guidance applies. |
    | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
@@ -99,7 +100,7 @@ Register the authenticator in code mode once per account and save the secret:
 
 > In Microsoft **Security info → Add sign-in method → Authenticator app →
 > "I can't scan the QR code"**, copy the one-time secret shown and put it in
-> `.env` as `VALID_OTP_SECRET_1`.
+> `.env` as `VALID_OTP_SECRET_n` for that account (`VALID_OTP_SECRET_1` for account 1).
 
 Treat this secret as sensitive — **it is the second factor.** It is masked in all
 logs, console output, and the HTML report, and is never printed. Add it to
@@ -142,27 +143,27 @@ Example, based on [`tests/Login.spec.ts`](tests/Login.spec.ts) and [`src/pages/l
 
 ```ts
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
 
 test.beforeEach(async ({ loginPage }) => {
     await loginPage.navigate();
 });
 
 test.describe('Amplify Health Product Portal - Login', () => {
-    test('Successful login via Microsoft SSO with valid credentials', async ({ loginPage, microsoftLoginPage, logger }) => {
+    // `account` = this worker's own test account (see CLAUDE.md § Projects)
+    test('Successful login via Microsoft SSO with valid credentials', async ({ account, loginPage, microsoftLoginPage, logger }) => {
         await logger.step('VERIFY_LOGIN_PAGE', async () => {          // Given
             await loginPage.expectLoginPageVisible();
         });
 
         await logger.step('ENTER_PORTAL_EMAIL', async () => {         // When
-            await loginPage.login(test_credentials.valid_username_1);
+            await loginPage.login(account.username);
         });
 
         await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => { // When
             await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1        // automated MFA — see § Authentication & MFA
+                account.username,
+                account.password,
+                account.otpSecret        // automated MFA — see § Authentication & MFA
             );
         });
 
@@ -218,11 +219,22 @@ Page objects extend `BasePage` and expose `Actions`/`Assertions` methods built o
 
 ## Logging & reports
 
-Every wrapped action/assertion logs a START/END line to the console and opens a matching step in the Playwright HTML report and trace viewer. On a test failure, the last 50 log lines are dumped automatically regardless of `LOG_LEVEL`. View the latest report with:
+Every wrapped action/assertion logs one `✓`/`✗` line with its duration to the console (`[START]` lines too at `LOG_LEVEL=DEBUG`) and opens a matching step in the Playwright HTML report and trace viewer. On a test failure, the last 200 log lines — `DEBUG` ones included — are dumped automatically regardless of `LOG_LEVEL`. View the latest report with:
 
 ```bash
 npx playwright show-report
 ```
+
+### Failure artifacts (`screenshot` / `trace`)
+
+On a **failed** test (configured in [playwright.config.ts](playwright.config.ts) `use`):
+
+- **Screenshot** — a final-state screenshot is attached to **both** the HTML report and the Allure report (the `allure-playwright` reporter picks up Playwright's test-result attachment automatically — no `allure.attachment()` call needed). This runs locally *and* in CI.
+- **Trace** — `trace: 'retain-on-failure'` **locally only**; it is turned **off under CI** (`trace: process.env.CI ? 'off' : 'retain-on-failure'`). A trace bundles full DOM snapshots and network payloads of authenticated claim/member pages, and both CI pipelines upload the reports as artifacts — so CI deliberately produces only the lighter screenshot, never a trace, to keep that PII out of shared artifacts. Open a local trace from the trace viewer via `npx playwright show-report` (click the failed test) or `npx playwright show-trace <trace.zip>`.
+
+Passing tests produce **no** screenshot or trace, so clean runs stay artifact-free.
+
+> **PII note.** A screenshot photographs the rendered DOM as-is, bypassing the `fill({ mask: true })` masking that keeps identifying values out of logs. That is why CI report artifacts use a short retention window (`retention-days: 3` on GitHub; set the pipeline run-retention policy to minimum on Azure DevOps, which has no per-artifact retention in YAML).
 
 ## Reviewing your changes
 

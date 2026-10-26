@@ -8,7 +8,7 @@
 //  maintenance needed.
 // ─────────────────────────────────────────────
 
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type BrowserContext } from '@playwright/test';
 
 type LocatorMatchers = ReturnType<typeof expect<Page>>;
 
@@ -71,6 +71,17 @@ export type WaitForResponseOptions = Parameters<Page['waitForResponse']>[1];
 // Options: signal, timeout
 export type WaitForRequestUrl = Parameters<Page['waitForRequest']>[0];
 export type WaitForRequestOptions = Parameters<Page['waitForRequest']>[1];
+
+// ─── context.storageState() ───────────────────
+// Snapshots the page's browser context (cookies, localStorage,
+// optionally IndexedDB) — reached via page.context().
+// Options: path, indexedDB
+export type StorageStateOptions = Parameters<BrowserContext['storageState']>[0];
+
+// ─── context.cookies() ────────────────────────
+// Returns the cookies of the page's browser context.
+// Parameters: urls (index 0) — limit to cookies sent to these URLs
+export type CookieUrls = Parameters<BrowserContext['cookies']>[0];
 
 // ─── expect(page) assertions ─────────────────────────────
 // Options types for LocatorAssertions matchers — index 0 for

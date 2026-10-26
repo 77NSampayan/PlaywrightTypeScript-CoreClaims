@@ -26,7 +26,7 @@
 //
 // Usage:
 //     node scripts/upload-intake-files.ts <file1> [file2 ...]
-//     node scripts/upload-intake-files.ts test-data/intake/OPEML2026100500060T.xlsx
+//     node scripts/upload-intake-files.ts "test-data/DPS/10.05.26/OPEML2026100500060T.xlsx"
 
 import dotenv from 'dotenv';
 import path from 'path';

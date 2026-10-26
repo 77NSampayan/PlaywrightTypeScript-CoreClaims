@@ -2,12 +2,14 @@ import { test as base } from '@playwright/test';
 // import { AuthenticationAPI } from '../../api/authentication/authentication-api.ts';
 import { logger, type SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { DbConnection, SqliteWasmConnection } from '@utils/db.util.ts';
-import { db_config, membership_db_config } from '@root/playwright.config.ts';
+import { db_config, membership_db_config, test_accounts, type TestAccount } from '@root/playwright.config.ts';
+import { storageStateFor } from '@constants/environment.config.ts';
 import { GenericAssertions } from '@base/GenericAssertions.util.ts';
 import { LoginPage } from '@pages/login.page.ts';
 import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
 import { LandingPage } from '@pages/landing.page.ts';
 import { AzureStorageSasPage } from '@pages/azure-storage-sas.page.ts';
+import { OutlookMailPage } from '@pages/outlook-mail.page.ts';
 
 
 export type TestFixtures = {
@@ -23,10 +25,14 @@ export type TestFixtures = {
     sqliteConnection: SqliteWasmConnection;
     landingPage: LandingPage;
     azureStorageSasPage: AzureStorageSasPage;
+    outlookMailPage: OutlookMailPage;
 };
 
 export type WorkerFixtures = {
     configInfo: void;   // worker-scoped: runs once per worker, not per test
+    // This worker's own Microsoft SSO account — the one its saved session
+    // (the `storageState` override below) is signed in as.
+    account: TestAccount;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -48,6 +54,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
             logger.highlight(`Project            : "${workerInfo.project.name}"`);
             logger.highlight(`Worker index       : "${workerInfo.workerIndex}"`);
             logger.highlight(`Parallel index     : "${workerInfo.parallelIndex}"`);
+            // Slot number only — never the username (see CLAUDE.md on identifiers in logs).
+            logger.highlight(`Account slot       : "#${workerInfo.parallelIndex + 1} of ${test_accounts.length}"`);
         });
 
         await logger.step('ENVIRONMENT', async () => {
@@ -65,6 +73,30 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         // ─────────────────────────────────────────────────────
  
     }, { scope: 'worker', auto: true }],   // auto: true = no need to declare in tests
+
+    // ── Worker-scoped: one test account per worker ───────────────
+    // parallelIndex is in [0, workers - 1] and is kept by the replacement when a
+    // worker restarts after a failure, so each account belongs to exactly one
+    // worker for the whole run. That only holds while `workers` <= the number of
+    // accounts — playwright.config.ts sets it equal; fail loudly if not.
+    account: [async ({}, use, workerInfo) => {
+        const account = test_accounts[workerInfo.parallelIndex];
+        if (!account) {
+            throw new Error(
+                `Worker slot #${workerInfo.parallelIndex + 1} has no test account: only ` +
+                `${test_accounts.length} configured. Lower --workers or add VALID_USERNAME_n accounts.`
+            );
+        }
+        await use(account);
+    }, { scope: 'worker' }],
+
+    // ── Built-in override: start signed in as this worker's account ──
+    // Loads the session tests/auth.setup.ts saved for the account above. A spec
+    // or describe that calls test.use({ storageState: ... }) replaces this
+    // entirely — e.g. Login.spec.ts and auth.setup.ts start signed out.
+    storageState: async ({}, use, testInfo) => {
+        await use(storageStateFor(testInfo.parallelIndex));
+    },
 
     // // ── Test-scoped: logger context reset per test ───────────────
     // authentication: async ({}, use) => {
@@ -134,6 +166,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
     azureStorageSasPage: async ({ page }, use) => {
         await use(new AzureStorageSasPage(page));
+    },
+
+    outlookMailPage: async ({ page }, use) => {
+        await use(new OutlookMailPage(page));
     },
 });
 

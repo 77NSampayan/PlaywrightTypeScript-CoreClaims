@@ -13,22 +13,23 @@ playwright-report*.zip
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/dom-dumps
 
 
 # Allure
 /allure-results/
 /allure-report/
 
-# Generated OPEML claim-upload test data (test-data/intake), generated
-# Payment Journal files (test-data/payment-journal), and any reference
-# OPEML*/*PAYMENT JOURNAL*.xlsx dropped at the repo root — regenerate via
-# scripts/generate-intake-batches.ts / scripts/generate-payment-journal.ts
-# rather than committing; reference copies may carry real data and must
-# never be pushed.
+# Generated test data — intake, memos, Payment Journal, Return File,
+# Disbursement, F2307 — all under test-data/<CHANNEL>/<date>/ (DPS, COM CHECK,
+# UB), plus any reference OPEML*/*PAYMENT_JOURNAL*.xlsx dropped at the repo
+# root — regenerate via scripts/generate-intake-batches.ts /
+# scripts/generate-payment-journal.ts rather than committing; reference
+# copies may carry real data and must never be pushed.
 /test-data/
 /OPEML*.xlsx
-/*PAYMENT JOURNAL*.xlsx
-/*-PF-IP-MS-EFT_COMCHECK*.xlsx
+/*PAYMENT_JOURNAL*.xlsx
+/*-PF-IP-MS-EFT_*COMCHECK*.xlsx
 
 # Local run-state for the generators (filename counters, last Transaction ID
 # suffix, last Document No.) — machine-specific, not shared.

@@ -23,8 +23,10 @@ export class SmartLogger {
   private activeLevel: LogLevel = resolveLogLevel();
   private testName: string | undefined = undefined;
 
-  // Circular buffer: keeps the last N log lines for failure dumps
-  private readonly BUFFER_SIZE = 50;
+  // Circular buffer: keeps the last N log lines for failure dumps. Sized to
+  // hold a whole Microsoft sign-in plus the steps after it — every action
+  // buffers two lines (DEBUG [START] + its result), so 50 lost the lead-up.
+  private readonly BUFFER_SIZE = 200;
   private logBuffer: string[] = [];
 
   private constructor() {}
@@ -101,12 +103,15 @@ export class SmartLogger {
   }
 
   /**
-   * Wraps a single Playwright action or assertion with START/END logging.
-   * Logs `[START] <startMessage>`, runs `fn`, then logs
-   * `[END] <passMessage>` on success or `[END] <failMessage>` on failure.
-   * The failure line is always emitted at ERROR level — red, and never hidden
-   * by LOG_LEVEL — which is what distinguishes it from the success line. Then
-   * rethrows, so the caller/Playwright still sees the original error.
+   * Wraps a single Playwright action or assertion so it leaves ONE line:
+   * `✓ <passMessage> (Nms)` at `level` on success, or `✗ <failMessage> (Nms)`
+   * at ERROR on failure — red, and never hidden by LOG_LEVEL. Then rethrows,
+   * so the caller/Playwright still sees the original error.
+   *
+   * `[START] <startMessage>` is emitted too, but at DEBUG: shown only with
+   * LOG_LEVEL=DEBUG, yet always buffered — so a failure dump still replays
+   * what was being attempted. The step name in the report/trace is
+   * `startMessage` either way.
    *
    * `passMessage` may be a function of the result, for messages that depend
    * on state only known after `fn` runs (e.g. the page URL after a navigation).
@@ -126,15 +131,16 @@ export class SmartLogger {
     failMessage: string,
     level: LogLevel = LogLevel.INFO,
   ): Promise<T> {
-    this.emit(level, LogFormatter.formatActionStart(startMessage));
+    this.emit(LogLevel.DEBUG, LogFormatter.formatActionStart(startMessage));
     return this.runStep(startMessage, async () => {
+      const startedAt = performance.now();
       try {
         const result = await fn();
         const pass = typeof passMessage === 'function' ? passMessage(result) : passMessage;
-        this.emit(level, LogFormatter.formatActionEnd(pass));
+        this.emit(level, LogFormatter.formatActionPass(pass, performance.now() - startedAt));
         return result;
       } catch (err) {
-        this.emit(LogLevel.ERROR, LogFormatter.formatActionEnd(failMessage));
+        this.emit(LogLevel.ERROR, LogFormatter.formatActionFail(failMessage, performance.now() - startedAt));
         throw err;
       }
     });

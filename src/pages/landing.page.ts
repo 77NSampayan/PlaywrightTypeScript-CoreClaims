@@ -42,6 +42,12 @@ export class LandingPage extends BasePage {
         return newPage;
     };
 
+    async isLandingPageVisible(timeout: number): Promise<boolean> {
+        // Soft: false (not a failure) when it never shows — e.g. a saved session
+        // that Microsoft rejected leaves the browser on its sign-in page instead.
+        return this.elements.waitForVisibleSoft(this.greetingHeading, 'Landing page greeting', { timeout });
+    };
+
     // ─── Assertions ───────────────────────────
 
     async expectLandingPageVisible(): Promise<void> {

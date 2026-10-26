@@ -20,9 +20,8 @@ const ANSI = {
   warn:    '\x1b[33m',   // Yellow
   error:   '\x1b[31m',   // Red
 
-  // Action lifecycle tag colors
+  // Action lifecycle tag color
   start:   '\x1b[96m',   // Bright Cyan
-  end:     '\x1b[94m',   // Bright Blue
 
   // Action message color
   action:  '\x1b[35m',   // Magenta
@@ -97,22 +96,30 @@ export class LogFormatter {
   /**
    * Formats the `[START] <message>` line that opens a logger.action() call.
    * The message is colored magenta, with any `"quoted"` substring bolded.
+   * Emitted at DEBUG — the pass/fail line alone carries a normal run.
    */
   static formatActionStart(message: string): string {
     return `${tag('START', ANSI.start)} ${this.colorize(message)}`;
   }
 
   /**
-   * Formats the `[END] <message>` line that closes a logger.action() call.
-   * The `[END]` tag is bold bright-blue; the message stays magenta.
+   * Formats the single line a successful logger.action() call leaves at its
+   * own level: a green check, the message, and how long it took.
    *
-   * Pass/fail is deliberately not tagged here. `logger.action()` emits its
-   * success line at the call's normal level and its failure line at ERROR,
-   * so the level tag already distinguishes them — a red `[ERROR]` marks the
-   * failure without a second redundant tag on the same line.
+   * Example output:
+   *   ✓ Clicked element "sign in button" (146ms)
    */
-  static formatActionEnd(message: string): string {
-    return `${tag('END', ANSI.end)} ${this.colorize(message)}`;
+  static formatActionPass(message: string, durationMs: number): string {
+    return `${ANSI.info}✓${ANSI.reset} ${this.colorize(message)} ${this.duration(durationMs)}`;
+  }
+
+  /**
+   * Formats the line a failed logger.action() call emits at ERROR: a red
+   * cross, the failure message, and how long it ran before failing — a
+   * duration near a timeout says "waited and gave up", not "broke at once".
+   */
+  static formatActionFail(message: string, durationMs: number): string {
+    return `${ANSI.error}✗${ANSI.reset} ${this.colorize(message)} ${this.duration(durationMs)}`;
   }
 
   // ─── Helpers ──────────────────────────────
@@ -124,6 +131,12 @@ export class LogFormatter {
     const ss  = String(now.getSeconds()).padStart(2, '0');
     const ms  = String(now.getMilliseconds()).padStart(3, '0');
     return `${hh}:${mm}:${ss}.${ms}`;
+  }
+
+  /** `(146ms)` under a second, `(12.3s)` above — dimmed gray, like the timestamp. */
+  private static duration(ms: number): string {
+    const text = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+    return `${ANSI.time}(${text})${ANSI.reset}`;
   }
 
   /**

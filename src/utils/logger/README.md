@@ -13,7 +13,7 @@ The core logger. Singleton at the framework level (`export const logger = SmartL
 | Method | Purpose |
 |---|---|
 | `setTestContext(testName)` | Call at the start of each test — resets per-test state and prints a START banner |
-| `endTest(passed)` | Call at the end of each test — prints an END banner; if `passed` is `false`, also dumps the last 50 buffered log lines (regardless of `LOG_LEVEL`) so failure context is visible even when running quiet |
+| `endTest(passed)` | Call at the end of each test — prints an END banner; if `passed` is `false`, also dumps the last 200 buffered log lines (regardless of `LOG_LEVEL`) so failure context is visible even when running quiet |
 
 Both are already wired up automatically by the `logger` fixture in [`src/fixtures/base.fixture.ts`](../../fixtures/base.fixture.ts) — you don't need to call them yourself in a test.
 
@@ -26,7 +26,7 @@ Both are already wired up automatically by the `logger` fixture in [`src/fixture
 | `highlight(message)` | Like `info()`, but styled like an action log (magenta, with any `"quoted"` substring bolded) — used for structured key/value dumps like the CONFIG INFO banner |
 | `step_log(message)` | Logs at STEP level, for step-level messages outside of `step()` |
 | `step(stepName, fn)` | Wraps `fn` in a named step: prints a step header, then runs `fn` inside a boxed `test.step()` so it groups in the report/trace viewer |
-| `action(startMessage, fn, passMessage, failMessage, level?)` | The core primitive — logs `[START]`, runs `fn` inside a boxed `test.step()`, then logs an `[END]` line and rethrows on error. The success line goes out at the call's own level, the failure line always at `ERROR` — so a red `[ERROR]` tag is what marks a failure, not a separate status tag. `passMessage` may be a function of the result for messages only known after `fn` runs. Defaults to `LogLevel.INFO`; almost every method on `ElementActions`/`ElementAssertions`/`BasePage` is a thin wrapper around this |
+| `action(startMessage, fn, passMessage, failMessage, level?)` | The core primitive — runs `fn` inside a boxed `test.step()` and leaves one line: `✓ passMessage (Nms)` at the call's own level, or `✗ failMessage (Nms)` always at `ERROR`, then rethrows. A `[START] startMessage` line goes out at `DEBUG` — hidden at the default level, but buffered, so a failure dump still shows what was being attempted. `passMessage` may be a function of the result for messages only known after `fn` runs. Defaults to `LogLevel.INFO`; almost every method on `ElementActions`/`ElementAssertions`/`BasePage` is a thin wrapper around this |
 
 **Configuration**
 
@@ -75,8 +75,9 @@ Pure formatting — ANSI color codes, timestamps, banners. `SmartLogger` calls i
 | `format({ level, message })` | A single log line: `[HH:MM:SS.mmm] [LEVEL] message` |
 | `formatStepHeader(stepName)` | A step separator line: `── STEP: name ──────────` |
 | `formatTestBanner(testName, event, passed?)` | The START/END banner block printed by `setTestContext()`/`endTest()` |
-| `formatActionStart(message)` | The `[START] message` line opening an `action()` call |
-| `formatActionEnd(message)` | The `[END] message` line closing an `action()` call |
+| `formatActionStart(message)` | The `[START] message` line opening an `action()` call (emitted at `DEBUG`) |
+| `formatActionPass(message, durationMs)` | The `✓ message (146ms)` line a successful `action()` call leaves |
+| `formatActionFail(message, durationMs)` | The `✗ message (10.0s)` line a failed `action()` call emits at `ERROR` |
 | `colorize(message)` | Colors a message magenta and bolds any `"quoted"` substring in place — used by `highlight()` and the action formatters |
 
 Test name and step name are intentionally omitted from `format()` — they're already shown once in the banner/step header, so repeating them on every line would be noise.
@@ -84,5 +85,5 @@ Test name and step name are intentionally omitted from `format()` — they're al
 ## Conventions
 
 - Always log through the shared `logger` singleton, not a new `SmartLogger` instance.
-- Prefer `action()` (via the `src/base` wrappers) over raw `info`/`error` calls for anything that performs a Playwright action or assertion — it gives you START/END logging, automatic ERROR-level escalation on failure, and a trace-viewer step for one call.
+- Prefer `action()` (via the `src/base` wrappers) over raw `info`/`error` calls for anything that performs a Playwright action or assertion — it gives you a timed ✓/✗ line, automatic ERROR-level escalation on failure, and a trace-viewer step for one call.
 - Keep sensitive values out of log messages, and remember that every `action()` start message is reused as the `test.step()` name — so anything interpolated into one reaches the HTML report and the trace, not just the console. For form input, pass `{ mask: true }` to `ElementActions.fill()`; and never interpolate a credential or account identifier into a `logger.step()` label.

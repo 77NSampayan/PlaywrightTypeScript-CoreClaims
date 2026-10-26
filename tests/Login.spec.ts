@@ -1,5 +1,8 @@
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
+
+// The sign-in itself is under test here, so opt out of the saved session the
+// msedge project otherwise loads (see tests/auth.setup.ts) and start signed out.
+test.use({ storageState: { cookies: [], origins: [] } });
 
 test.beforeEach(async ({ loginPage, logger }) => {
     await logger.step('NAVIGATE TO LOGIN PAGE', async () => {
@@ -9,20 +12,25 @@ test.beforeEach(async ({ loginPage, logger }) => {
 });
 
 test.describe('Amplify Health Product Portal - Login', () => {
-    test('Successful login via Microsoft SSO with valid credentials', async ({ loginPage, microsoftLoginPage, landingPage, logger }) => {
+    test('Successful login via Microsoft SSO with valid credentials', async ({ account, loginPage, microsoftLoginPage, landingPage, logger }) => {
+        // Up to 30s waiting for a fresh OTP code, on top of the SSO round-trip.
+        test.setTimeout(90_000);
+
         await logger.step('VERIFY_LOGIN_PAGE', async () => {
             await loginPage.expectLoginPageVisible();
         });
 
         await logger.step('ENTER_PORTAL_EMAIL', async () => {
-            await loginPage.login(test_credentials.valid_username_1);
+            await loginPage.login(account.username);
         });
 
         await logger.step('COMPLETE_MICROSOFT_SIGN_IN', async () => {
+            // The setup project signed in moments ago — wait out its OTP code.
+            await microsoftLoginPage.waitForFreshOtpCode();
             await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1
+                account.username,
+                account.password,
+                account.otpSecret
             );
         });
 

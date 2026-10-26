@@ -37,12 +37,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # No `cache: npm` here: it requires a committed lockfile, which this repo
-          # does not keep. Caching without one fails the run ("lock file is not found").
+          # Caches npm's download cache, keyed on the committed package-lock.json.
+          cache: npm
 
       - name: Install dependencies
-        # npm install (not npm ci) because there is no package-lock.json to install from.
-        run: npm install
+        # npm ci, not npm install: installs exactly what package-lock.json pins and
+        # fails if it is out of sync with package.json, rather than silently resolving.
+        run: npm ci
 
       # Install only what the selected project needs:
       #  - db      : no browser at all
@@ -90,16 +91,20 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
 
       # Upload the HTML report whether the run passed or failed, so failures are debuggable.
+      # On failure this report now carries a screenshot of the authenticated page, so keep
+      # the retention window short to limit how long that PII lives in a shared artifact.
+      # (Traces are excluded entirely under CI by playwright.config.ts — see its `trace` note.)
       - name: Upload Playwright HTML report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ inputs.project }}
           path: playwright-report/
+          retention-days: 3
 
       # Build the Allure report with all widgets enabled. Runs on failure too (!cancelled),
       # so a failed suite still produces a report. Requires the Allure CLI + a JRE on the
-      # runner. Needs no committed lockfile and no browser.
+      # runner. Needs no browser.
       #
       # Trends/history: checkout wipes the workspace each run, so the previous report's
       # history/ is stashed OUTSIDE the repo (under the runner user profile, keyed per
@@ -194,9 +199,12 @@ jobs:
           BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
 
+      # Same PII reasoning as the HTML report upload above: on failure the Allure report
+      # embeds the page screenshot, so keep the retention window short.
       - name: Upload Allure report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: allure-report-${{ inputs.project }}
           path: allure-report/
+          retention-days: 3

@@ -1,27 +1,33 @@
 import { readdir } from 'fs/promises';
+import path from 'path';
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { checkSasNotExpired, scopeToFolder, uploadFileToBlob } from '@utils/blobUpload.util.ts';
-import { generateIntakeBatches } from '../scripts/generate-intake-batches.ts';
+import { ALL_PAYMENT_MODES, generateIntakeBatches, getChannelDir, isIntakeFilename } from '../scripts/generate-intake-batches.ts';
 
-const INTAKE_DIR = 'test-data/intake';
 const INTAKE_FOLDER = 'testblob/Out-Patient Teleconsulation';
 
+// Intake files now live under each payment channel's own test-data/<CHANNEL>/<date>/
+// folder, alongside that channel's other artifacts (memos, payment journal,
+// etc.) — isIntakeFilename() picks out just the OPEML*.xlsx ones.
 async function listXlsxFiles(): Promise<string[]> {
-    try {
-        const files = await readdir(INTAKE_DIR);
-        return files.filter((f) => f.toLowerCase().endsWith('.xlsx'));
-    } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-        throw err;
+    const files: string[] = [];
+    for (const mode of ALL_PAYMENT_MODES) {
+        const channelDir = getChannelDir(mode);
+        try {
+            const entries = await readdir(channelDir);
+            files.push(...entries.filter(isIntakeFilename).map((f) => path.join(channelDir, f)));
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
     }
+    return files;
 }
 
 // Picks up whatever is currently on disk rather than hardcoding filenames —
 // scripts/generate-intake-batches.ts's own naming (date + daily counter)
 // means hardcoded names wouldn't reliably exist by the time this runs.
-// Generates a fresh batch on demand if the folder is empty, rather than
+// Generates a fresh batch on demand if nothing's found, rather than
 // requiring a separate manual script run first.
 async function listIntakeFiles(): Promise<string[]> {
     let files = await listXlsxFiles();
@@ -31,9 +37,9 @@ async function listIntakeFiles(): Promise<string[]> {
     }
 
     if (files.length === 0) {
-        throw new Error(`No .xlsx files found under ${INTAKE_DIR}/ even after running the generator.`);
+        throw new Error('No intake .xlsx files found under test-data/ even after running the generator.');
     }
-    return files.map((f) => `${INTAKE_DIR}/${f}`);
+    return files;
 }
 
 test.describe('Claims Intake — Azure Blob Upload', () => {
@@ -45,25 +51,22 @@ test.describe('Claims Intake — Azure Blob Upload', () => {
     //
     // Logs into the Azure Portal (reusing the same Microsoft SSO flow/
     // credentials as the Core Claims app), generates a fresh account-level
-    // SAS via the "Shared access signature" blade, then uploads every file
-    // currently in test-data/intake/ through the same fast API call
-    // scripts/upload-intake-files.ts uses — rather than driving the Portal's
-    // own (slower, heavier) Upload button. One SAS, minted fresh this run,
-    // covers the whole batch — no per-file expiry concern within one run.
+    // SAS via the "Shared access signature" blade, then uploads every intake
+    // file currently across each channel's test-data/<CHANNEL>/<date>/ folder
+    // through the same fast API call scripts/upload-intake-files.ts uses —
+    // rather than driving the Portal's own (slower, heavier) Upload button.
+    // One SAS, minted fresh this run, covers the whole batch — no per-file
+    // expiry concern within one run.
     test('Generates a fresh SAS via the Portal, then uploads every intake file through the API', async ({
-        microsoftLoginPage,
         azureStorageSasPage,
         assert,
         logger,
     }) => {
-        await logger.step('LOGIN_TO_AZURE_PORTAL', async () => {
+        // Already signed in: the `setup` project (tests/auth.setup.ts) saved the
+        // Microsoft session this test starts from, so no password or OTP here.
+        await logger.step('OPEN_AZURE_PORTAL_WITH_SAVED_SESSION', async () => {
             await azureStorageSasPage.navigate(uiEndPoints.azureStorageSas);
-            await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1
-            );
-            await microsoftLoginPage.expectRedirectedBackToApp();
+            await azureStorageSasPage.expectSasBladeVisible();
         });
 
         let blobServiceSasUrl = '';

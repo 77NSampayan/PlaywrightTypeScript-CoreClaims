@@ -1,12 +1,10 @@
 import { readdir } from 'fs/promises';
+import path from 'path';
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { checkSasNotExpired, scopeToFolder, uploadFileToBlob } from '@utils/blobUpload.util.ts';
+import { getChannelDir } from '../scripts/generate-intake-batches.ts';
 import { generatePaymentJournals, generateDisbursementFile } from '../scripts/generate-payment-journal.ts';
-
-const JOURNAL_DIR = 'test-data/payment-journal';
-const DISBURSEMENT_DIR = 'test-data/disbursement';
 
 // Both under "claimsblob" (not "testblob", like the other three upload
 // specs) — confirmed via the real UB Payment Journal template's Reference
@@ -18,10 +16,17 @@ const DISBURSEMENT_DIR = 'test-data/disbursement';
 const PAYMENT_JOURNAL_FOLDER = 'claimsblob/Data Enrichment/paymentjournal';
 const DISBURSEMENT_FOLDER = 'claimsblob/Data Enrichment/comm_check';
 
-async function listXlsxFiles(dir: string): Promise<string[]> {
+// Payment Journal/Disbursement now live in their channel's shared
+// test-data/<CHANNEL>/<date>/ folder, alongside that channel's intake file
+// (and memos) — these patterns pick out just the Payment Journal/Disbursement
+// output, not the other .xlsx artifacts sitting next to it.
+const isJournalFilename = (f: string) => /^(DPS|UB)_PAYMENT_JOURNAL_/.test(f) && f.toLowerCase().endsWith('.xlsx');
+const isDisbursementFilename = (f: string) => /-PF-IP-MS-EFT_/.test(f) && f.toLowerCase().endsWith('.xlsx');
+
+async function listMatchingFiles(dir: string, matches: (f: string) => boolean): Promise<string[]> {
     try {
         const files = await readdir(dir);
-        return files.filter((f) => f.toLowerCase().endsWith('.xlsx'));
+        return files.filter(matches).map((f) => path.join(dir, f));
     } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
         throw err;
@@ -29,27 +34,31 @@ async function listXlsxFiles(dir: string): Promise<string[]> {
 }
 
 async function listJournalFiles(): Promise<string[]> {
-    let files = await listXlsxFiles(JOURNAL_DIR);
+    const dirs = [getChannelDir('DPS'), getChannelDir('UB')];
+
+    let files = (await Promise.all(dirs.map((dir) => listMatchingFiles(dir, isJournalFilename)))).flat();
     if (files.length === 0) {
         await generatePaymentJournals();
-        files = await listXlsxFiles(JOURNAL_DIR);
+        files = (await Promise.all(dirs.map((dir) => listMatchingFiles(dir, isJournalFilename)))).flat();
     }
     if (files.length === 0) {
-        throw new Error(`No Payment Journal files found under ${JOURNAL_DIR}/ even after generating.`);
+        throw new Error('No Payment Journal files found even after generating.');
     }
-    return files.map((f) => `${JOURNAL_DIR}/${f}`);
+    return files;
 }
 
 async function listDisbursementFiles(): Promise<string[]> {
-    let files = await listXlsxFiles(DISBURSEMENT_DIR);
+    const dir = getChannelDir('COMCHECK');
+
+    let files = await listMatchingFiles(dir, isDisbursementFilename);
     if (files.length === 0) {
         await generateDisbursementFile();
-        files = await listXlsxFiles(DISBURSEMENT_DIR);
+        files = await listMatchingFiles(dir, isDisbursementFilename);
     }
     if (files.length === 0) {
-        throw new Error(`No Disbursement File found under ${DISBURSEMENT_DIR}/ even after generating.`);
+        throw new Error(`No Disbursement File found under ${dir}/ even after generating.`);
     }
-    return files.map((f) => `${DISBURSEMENT_DIR}/${f}`);
+    return files;
 }
 
 test.describe('Claims Intake — Payment Journal / Disbursement Upload', () => {
@@ -58,19 +67,15 @@ test.describe('Claims Intake — Payment Journal / Disbursement Upload', () => {
     // container (claimsblob, not testblob). Only runs under the `api`
     // project (see playwright.config.ts).
     test('Generates a fresh SAS via the Portal, then uploads the DPS/UB Payment Journal files and ComCheck Disbursement File through the API', async ({
-        microsoftLoginPage,
         azureStorageSasPage,
         assert,
         logger,
     }) => {
-        await logger.step('LOGIN_TO_AZURE_PORTAL', async () => {
+        // Already signed in: the `setup` project (tests/auth.setup.ts) saved the
+        // Microsoft session this test starts from, so no password or OTP here.
+        await logger.step('OPEN_AZURE_PORTAL_WITH_SAVED_SESSION', async () => {
             await azureStorageSasPage.navigate(uiEndPoints.azureStorageSas);
-            await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1
-            );
-            await microsoftLoginPage.expectRedirectedBackToApp();
+            await azureStorageSasPage.expectSasBladeVisible();
         });
 
         let blobServiceSasUrl = '';

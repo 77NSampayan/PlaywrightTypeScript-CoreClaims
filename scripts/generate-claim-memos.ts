@@ -22,28 +22,27 @@
 // our own negative batch rows fail: a missing Diagnosis) is unchanged from
 // before.
 //
-// Reads every .xlsx already produced by generate-intake-batches.ts under
-// test-data/intake/ rather than re-deriving which rows were "just" generated
-// — so it stays correct even if run later, against whichever OPEML files
-// are sitting in that folder at the time.
+// Reads every intake .xlsx already produced by generate-intake-batches.ts
+// under each channel's test-data/<CHANNEL>/<date>/ folder rather than
+// re-deriving which rows were "just" generated — so it stays correct even if
+// run later, against whichever OPEML files are sitting there at the time.
 //
 // Usage:
 //     node scripts/generate-claim-memos.ts
 //
-// Output:
-//     test-data/intake/memos/<Control Code>_<Member Name>_<visit date MMDDYYYY>_AM.pdf
-//     test-data/intake/memos/<Control Code>_<Member Name>_<visit date MMDDYYYY>_DM.pdf
+// Output (written into the same channel/date folder as the intake file it
+// came from, alongside it — not a separate shared folder):
+//     test-data/<CHANNEL>/<date>/<Control Code>_<Member Name>_<visit date MMDDYYYY>_AM.pdf
+//     test-data/<CHANNEL>/<date>/<Control Code>_<Member Name>_<visit date MMDDYYYY>_DM.pdf
 
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { ALL_PAYMENT_MODES, getChannelDir, getPaymentModeFilter, isIntakeFilename, type PaymentMode } from './generate-intake-batches.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.dirname(__dirname);
-const INTAKE_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
-const MEMO_DIR = path.join(INTAKE_DIR, 'memos');
 const ASSETS_DIR = path.join(__dirname, 'templates', 'assets');
 
 // The reason is always this for our own negative-batch data: every "Y"-tagged
@@ -56,6 +55,7 @@ export type FailedRow = {
     controlCode: string;
     memberName: string;
     doctor: string;
+    paymentMode: PaymentMode;
     /** As stored in the sheet, e.g. "10/04/2026". */
     visitDateSlash: string;
 };
@@ -76,34 +76,39 @@ function cellToDateSlash(value: ExcelJS.CellValue): string {
 export async function readFailedRows(): Promise<FailedRow[]> {
     const rows: FailedRow[] = [];
 
-    let dirEntries: string[];
-    try {
-        dirEntries = await readdir(INTAKE_DIR);
-    } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return rows; // nothing generated yet
-        throw err;
-    }
-    const files = dirEntries.filter((f) => f.toLowerCase().endsWith('.xlsx'));
+    for (const paymentMode of ALL_PAYMENT_MODES) {
+        const channelDir = getChannelDir(paymentMode);
 
-    for (const file of files) {
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(path.join(INTAKE_DIR, file));
-        const sheet = workbook.worksheets[0];
-        if (!sheet) continue;
+        let dirEntries: string[];
+        try {
+            dirEntries = await readdir(channelDir);
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue; // nothing generated for this channel today
+            throw err;
+        }
+        const files = dirEntries.filter(isIntakeFilename);
 
-        sheet.eachRow((row, rowNumber) => {
-            if (rowNumber === 1) return; // header
+        for (const file of files) {
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.readFile(path.join(channelDir, file));
+            const sheet = workbook.worksheets[0];
+            if (!sheet) continue;
 
-            const actionMemo = String(row.getCell(20).value ?? '').trim(); // "Action Memo"
-            if (actionMemo !== 'Y') return;
+            sheet.eachRow((row, rowNumber) => {
+                if (rowNumber === 1) return; // header
 
-            rows.push({
-                memberName: String(row.getCell(2).value ?? '').trim(),   // "Name"
-                doctor: String(row.getCell(6).value ?? '').trim(),       // "Doctor"
-                visitDateSlash: cellToDateSlash(row.getCell(8).value), // "Visit Date"
-                controlCode: String(row.getCell(14).value ?? '').trim(), // "Control Code"
+                const actionMemo = String(row.getCell(20).value ?? '').trim(); // "Action Memo"
+                if (actionMemo !== 'Y') return;
+
+                rows.push({
+                    memberName: String(row.getCell(2).value ?? '').trim(),   // "Name"
+                    doctor: String(row.getCell(6).value ?? '').trim(),       // "Doctor"
+                    paymentMode,
+                    visitDateSlash: cellToDateSlash(row.getCell(8).value), // "Visit Date"
+                    controlCode: String(row.getCell(14).value ?? '').trim(), // "Control Code"
+                });
             });
-        });
+        }
     }
 
     return rows;
@@ -309,15 +314,19 @@ async function buildDisapprovalMemo(row: FailedRow, today: Date): Promise<Uint8A
     return doc.save();
 }
 
-// Exported so tests/ActionMemoUpload.spec.ts can call it directly (generate
-// memos on demand when test-data/intake/memos/ is empty) instead of
-// requiring a separate manual `node scripts/generate-claim-memos.ts` step.
+// Exported so tests/ClaimMemoUpload.spec.ts can call it directly (generate
+// memos on demand when none exist yet for today) instead of requiring a
+// separate manual `node scripts/generate-claim-memos.ts` step.
 export async function generateClaimMemos(): Promise<void> {
-    await mkdir(MEMO_DIR, { recursive: true });
+    const filter = getPaymentModeFilter();
+    let failedRows = await readFailedRows();
+    if (filter) {
+        failedRows = failedRows.filter((row) => row.paymentMode === filter);
+    }
 
-    const failedRows = await readFailedRows();
     if (failedRows.length === 0) {
-        console.log('No Action Memo = "Y" rows found under test-data/intake/ — run generate-intake-batches.ts first.');
+        const scope = filter ? `Action Memo = "Y" rows for ${filter}` : 'Action Memo = "Y" rows';
+        console.log(`No ${scope} found — run generate-intake-batches.ts first.`);
         return;
     }
 
@@ -326,21 +335,23 @@ export async function generateClaimMemos(): Promise<void> {
     for (const row of failedRows) {
         const visitDateCompact = slashToCompact(row.visitDateSlash);
         const baseName = `${row.controlCode}_${row.memberName}_${visitDateCompact}`;
+        const outDir = getChannelDir(row.paymentMode);
+        await mkdir(outDir, { recursive: true });
 
         const amBytes = await buildActionMemo(row, today);
-        const amPath = path.join(MEMO_DIR, `${baseName}_AM.pdf`);
+        const amPath = path.join(outDir, `${baseName}_AM.pdf`);
         await writeFile(amPath, amBytes);
         console.log(`Wrote Action Memo: ${amPath}`);
 
         const dmBytes = await buildDisapprovalMemo(row, today);
-        const dmPath = path.join(MEMO_DIR, `${baseName}_DM.pdf`);
+        const dmPath = path.join(outDir, `${baseName}_DM.pdf`);
         await writeFile(dmPath, dmBytes);
         console.log(`Wrote Disapproval Memo: ${dmPath}`);
     }
 }
 
 // Runs automatically only when invoked directly (`node scripts/generate-claim-memos.ts`),
-// not when imported as a module (e.g. by tests/ActionMemoUpload.spec.ts).
+// not when imported as a module (e.g. by tests/ClaimMemoUpload.spec.ts).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     await generateClaimMemos();
 }

@@ -1,18 +1,20 @@
 // Generates OPEML claim-upload test data for the three payment modes (DPS,
 // ComCheck, UB/UnionBank), as two batches:
 //
-//   - NEGATIVE batch (first 3 files): every row has Action Memo = "Y" and
-//     blank Diagnosis/Dx Code, so the upload is expected to fail.
+//   - NEGATIVE batch (first 3 files): 2 rows each — the 1st row is complete
+//     and passing (Action Memo = "N"), and only the 2nd row is the
+//     deliberate failure (blank Diagnosis/Dx Code, Action Memo = "Y"). Not
+//     every row in the file fails.
 //   - POSITIVE batch (next 3 files): same doctor-per-payment-mode mapping
-//     and column structure, but complete fields (Action Memo = "N",
-//     Diagnosis/Dx Code filled in) and different patients.
+//     and column structure, but every row is complete (Action Memo = "N",
+//     Diagnosis/Dx Code filled in) and uses different patients.
 //
 // Filenames are OPEML<today's date, YYYYMMDD><5-digit running counter>T —
 // the counter continues across runs on the same day (persisted in
 // .intake-sequence-state.json, next to this script) and resets to 1 the
 // first time the script runs on a new day. Deleting generated files under
-// test-data/intake/ does not affect this — the counter lives in the state
-// file, not the output directory.
+// test-data/ does not affect this — the counter lives in the state
+// file, not the output directories.
 //
 // Schema, column widths, and the fixed test-environment values (Source
 // System, Approval No, OTP, PF Amount, Claim Type, Procedure, Care Setting,
@@ -29,14 +31,18 @@
 //
 // Usage:
 //     node scripts/generate-intake-batches.ts
+//     PAYMENT_MODE_FILTER=UB node scripts/generate-intake-batches.ts   # UB only
 //
-// Output (example, run on 2026-10-05, first run of the day):
-//     test-data/intake/OPEML2026100500001T.xlsx  (DPS,      negative)
-//     test-data/intake/OPEML2026100500002T.xlsx  (ComCheck, negative)
-//     test-data/intake/OPEML2026100500003T.xlsx  (UB,       negative)
-//     test-data/intake/OPEML2026100500004T.xlsx  (DPS,      positive)
-//     test-data/intake/OPEML2026100500005T.xlsx  (ComCheck, positive)
-//     test-data/intake/OPEML2026100500006T.xlsx  (UB,       positive)
+// Output (example, run on 2026-10-05, first run of the day, no filter) — one
+// folder per payment channel, then date; every other generator's output for
+// that channel (memos, payment journal, return file, disbursement, F2307)
+// lands in the same date folder alongside the intake file, not a separate one:
+//     test-data/DPS/10.05.26/OPEML2026100500001T.xlsx        (DPS,      negative)
+//     test-data/COM CHECK/10.05.26/OPEML2026100500002T.xlsx  (ComCheck, negative)
+//     test-data/UB/10.05.26/OPEML2026100500003T.xlsx         (UB,       negative)
+//     test-data/DPS/10.05.26/OPEML2026100500004T.xlsx        (DPS,      positive)
+//     test-data/COM CHECK/10.05.26/OPEML2026100500005T.xlsx  (ComCheck, positive)
+//     test-data/UB/10.05.26/OPEML2026100500006T.xlsx         (UB,       positive)
 
 import ExcelJS from 'exceljs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
@@ -45,7 +51,6 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
-const OUTPUT_DIR = path.join(REPO_ROOT, 'test-data', 'intake');
 const STATE_FILE = path.join(__dirname, '.intake-sequence-state.json');
 
 // Ad hoc "generate as if it were a different day" override (e.g. preparing
@@ -68,19 +73,87 @@ const HEADERS = [
 ];
 
 export type PaymentMode = 'DPS' | 'COMCHECK' | 'UB';
+export const ALL_PAYMENT_MODES: PaymentMode[] = ['DPS', 'COMCHECK', 'UB'];
+
+// Per-channel/date folder layout: test-data/<CHANNEL>/<MM.DD.YY>/ — every
+// artifact type for that channel (intake, memos, payment journal, return
+// file, disbursement, F2307) lands in the same date folder together,
+// distinguished by filename convention, not by further subfolders.
+export const CHANNEL_FOLDER: Record<PaymentMode, string> = {
+    DPS: 'DPS',
+    COMCHECK: 'COM CHECK',
+    UB: 'UB',
+};
+
+export function formatDateFolder(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
+    return `${month}.${day}.${year}`;
+}
+
+export function getChannelDir(paymentMode: PaymentMode, date: Date = getToday()): string {
+    return path.join(REPO_ROOT, 'test-data', CHANNEL_FOLDER[paymentMode], formatDateFolder(date));
+}
+
+// Reliably identifies an intake-batch file inside a channel's mixed folder —
+// payment journal/return file/disbursement/F2307/memo output sits alongside
+// it there too. Every intake filename is OPEML<date><counter>T.xlsx, and no
+// other artifact's .xlsx output starts with "OPEML" (memos share that
+// control-code prefix but are always .pdf, never .xlsx).
+export function isIntakeFilename(name: string): boolean {
+    return /^OPEML.*\.xlsx$/i.test(name);
+}
+
+// Ad hoc "generate for one payment mode only" override, e.g.
+// PAYMENT_MODE_FILTER=UB — same reasoning as FAKE_TODAY above: not a
+// standing feature to rely on, defaults to every mode. Every generator that
+// loops over payment modes (intake batches, Payment Journal, Disbursement
+// File, F2307, claim memos) reads this via filterPaymentModes()/
+// matchesPaymentModeFilter() rather than its own copy of the env lookup.
+export function getPaymentModeFilter(): PaymentMode | null {
+    const override = process.env.PAYMENT_MODE_FILTER?.trim().toUpperCase();
+    if (!override) return null;
+    if (!ALL_PAYMENT_MODES.includes(override as PaymentMode)) {
+        throw new Error(`Invalid PAYMENT_MODE_FILTER "${override}" — expected one of ${ALL_PAYMENT_MODES.join(', ')}.`);
+    }
+    return override as PaymentMode;
+}
+
+// Narrows a list of modes to the active PAYMENT_MODE_FILTER, if any. Generic
+// over T (rather than just PaymentMode) so callers with a narrower mode
+// subset — e.g. generate-payment-journal.ts's JournalPaymentMode = 'DPS' |
+// 'UB' — get that same narrower type back, not the full PaymentMode union.
+export function filterPaymentModes<T extends PaymentMode>(modes: T[]): T[] {
+    const filter = getPaymentModeFilter();
+    return filter ? modes.filter((mode): mode is T => (mode as PaymentMode) === filter) : modes;
+}
+
+// True when `mode` should be generated under the active PAYMENT_MODE_FILTER
+// (i.e. no filter is set, or it matches) — for generators that are only
+// ever one fixed mode (F2307/Disbursement = ComCheck, Return File = DPS)
+// rather than looping over a list.
+export function matchesPaymentModeFilter(mode: PaymentMode): boolean {
+    const filter = getPaymentModeFilter();
+    return !filter || filter === mode;
+}
 
 // Doctor name(s) must match the live system's physician master data exactly,
 // including the trailing space on some of these (present in the reference
 // files too) — the app looks the doctor up by this string, so a "cleaned
 // up" name would silently break the payment-mode routing.
 //
-// ComCheck has two valid doctors (per the real physician reference table) —
-// pickDoctor() rotates between them when generating new rows, and
-// isDoctorForMode() treats either as valid when matching existing rows.
+// ComCheck has exactly one valid doctor — VILLANUEVA, PURA CORAZON REYES.
+// JAN ROSLYN T. EMPINADO was removed per explicit instruction. UB's doctor
+// has been replaced per explicit instruction twice now — MA. TERESA VICTORIA
+// LUCIA DIMAGIBA, then ALEJANDRINO, ROSARIO JULIA MARGARITA CHANTAL S., now
+// GALEDO, EVELYN SHIELA H. The array shape (rather than a single string) is
+// kept for all three modes so pickDoctor()/isDoctorForMode() stay generic if
+// a mode ever needs more than one again.
 export const PAYMENT_MODE_DOCTORS: Record<PaymentMode, string[]> = {
     DPS: ['TOMAS ANTONIO'],
-    COMCHECK: ['JAN ROSLYN T. EMPINADO ', 'VILLANUEVA, PURA CORAZON REYES'],
-    UB: ['MA. TERESA VICTORIA LUCIA DIMAGIBA '],
+    COMCHECK: ['VILLANUEVA, PURA CORAZON REYES'],
+    UB: ['GALEDO, EVELYN SHIELA H.'],
 };
 
 export function pickDoctor(paymentMode: PaymentMode): string {
@@ -126,7 +199,7 @@ function nextTransactionId(): string {
 
 // Persisted across runs so the filename counter keeps advancing instead of
 // restarting from the reference files every time. Lives next to the script,
-// not under test-data/intake/, so deleting generated output doesn't reset it.
+// not under test-data/, so deleting generated output doesn't reset it.
 type SequenceState = {
     /** YYYYMMDD of the last run — the counter resets to 1 the first run on a new date. */
     date: string;
@@ -220,9 +293,14 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
     const doctor = pickDoctor(paymentMode);
 
     patients.forEach((patient, i) => {
-        const diagnosis = negative ? '' : SAMPLE_DIAGNOSIS.diagnosis;
-        const dxCode = negative ? '' : SAMPLE_DIAGNOSIS.dxCode;
-        const actionMemo = negative ? 'Y' : 'N';
+        // In a negative-batch file, only the 2nd row is the deliberate
+        // failure (blank Diagnosis/Dx Code, Action Memo = "Y") — the 1st row
+        // is complete and passing, so the file isn't "every row fails."
+        // Positive batches are unaffected: every row stays complete/"N".
+        const rowFails = negative && i > 0;
+        const diagnosis = rowFails ? '' : SAMPLE_DIAGNOSIS.diagnosis;
+        const dxCode = rowFails ? '' : SAMPLE_DIAGNOSIS.dxCode;
+        const actionMemo = rowFails ? 'Y' : 'N';
 
         sheet.addRow([
             patient.memberCode,
@@ -251,21 +329,21 @@ function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Pat
     return workbook;
 }
 
-async function writeBatch(batch: BatchEntry[], patients: Patient[], negative: boolean, visitDate: string, receivedDate: string): Promise<void> {
+async function writeBatch(batch: BatchEntry[], patients: Patient[], negative: boolean, visitDate: string, receivedDate: string, today: Date): Promise<void> {
     for (const entry of batch) {
         const workbook = buildWorkbook(entry.filename, entry.paymentMode, patients, negative, visitDate, receivedDate);
-        const outPath = path.join(OUTPUT_DIR, `${entry.filename}.xlsx`);
+        const outDir = getChannelDir(entry.paymentMode, today);
+        await mkdir(outDir, { recursive: true });
+        const outPath = path.join(outDir, `${entry.filename}.xlsx`);
         await workbook.xlsx.writeFile(outPath);
         console.log(`Wrote ${negative ? 'negative' : 'positive'} batch file: ${outPath}`);
     }
 }
 
 // Exported so tests/IntakeUpload.spec.ts can call it directly (generate a
-// sample file on demand when test-data/intake/ is empty) instead of
+// sample batch on demand when no intake files exist for today) instead of
 // requiring a separate manual `node scripts/generate-intake-batches.ts` step.
 export async function generateIntakeBatches(): Promise<void> {
-    await mkdir(OUTPUT_DIR, { recursive: true });
-
     const state = await loadState();
     const now = getToday();
     const yesterday = new Date(now);
@@ -280,11 +358,12 @@ export async function generateIntakeBatches(): Promise<void> {
     // from wherever the last run left off.
     let counter = state.date === today ? state.lastCounter : 0;
 
-    const negativeBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const activeModes = filterPaymentModes(PAYMENT_MODE_ORDER);
+    const negativeBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });
-    const positiveBatch: BatchEntry[] = PAYMENT_MODE_ORDER.map((paymentMode) => {
+    const positiveBatch: BatchEntry[] = activeModes.map((paymentMode) => {
         counter += 1;
         return { filename: buildFilename(today, counter), paymentMode };
     });
@@ -292,8 +371,8 @@ export async function generateIntakeBatches(): Promise<void> {
     const negativePatients = pickRandomPatients(2);
     const positivePatients = pickRandomPatients(2, negativePatients);
 
-    await writeBatch(negativeBatch, negativePatients, true, visitDate, receivedDate);
-    await writeBatch(positiveBatch, positivePatients, false, visitDate, receivedDate);
+    await writeBatch(negativeBatch, negativePatients, true, visitDate, receivedDate, now);
+    await writeBatch(positiveBatch, positivePatients, false, visitDate, receivedDate, now);
 
     await saveState({
         date: today,

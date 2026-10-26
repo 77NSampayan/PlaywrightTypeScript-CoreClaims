@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
+import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { CoreClaimsHomePage } from '@pages/core-claims-home.page.ts';
 import { ClaimsCapturePage } from '@pages/claims-capture.page.ts';
 import { ClaimCaptureFormPage } from '@pages/claim-capture-form.page.ts';
@@ -58,7 +58,7 @@ const SAMPLE_MEMBER = {
 const SAMPLE_PROVIDER = {
     providerId: 'PROV-0001',
     providerName: 'Sample Provider Clinic',
-    providerFlag: 'N',
+    providerFlag: 'No',
     billingGracePeriod: '30',
     loaEndorsement: 'LOA-0001',
     vatPercentage: '12',
@@ -69,23 +69,70 @@ const SAMPLE_PROVIDER = {
     providerDiscountPercentage: '10',
 };
 
-test.beforeEach(async ({ loginPage, logger }) => {
+// Free-text "as written on the claim" diagnosis — generic sample wording, not
+// tied to any real patient record.
+const SAMPLE_DIAGNOSIS_DESCRIPTION = 'Acute upper respiratory infection, unspecified';
+
+// Fixed sample data for Items → Line 1. The Care Team member reuses the
+// covered provider above, so the line's treating provider is one the claim
+// already knows about.
+const SAMPLE_CLAIM_LINE = {
+    dateOfService: today,
+    treatmentStartDate: today,
+    treatmentEndDate: today,
+    quantity: '1',
+    originalDescription: 'Sample consultation',
+    careTeamProviderId: SAMPLE_PROVIDER.providerId,
+    careTeamProviderName: SAMPLE_PROVIDER.providerName,
+    // TODO: confirm against the real "Amount Type" dropdown — its options
+    // weren't in the captured DOM (overlay renders on open). Placeholder.
+    financialAmountType: 'CLAIMED',
+    financialAmount: '1000',
+
+     financialAmountType_2: 'CLAIMED_TOTAL',
+    financialAmount_2: '500',
+};
+
+// Items → Line 2, added via "Add Item". Same date, provider and amount type as
+// Line 1 — only the description and amount differ, so the two lines are
+// distinguishable on Review without introducing new unconfirmed values.
+const SAMPLE_CLAIM_LINE_2 = {
+    ...SAMPLE_CLAIM_LINE,
+    originalDescription: 'Sample laboratory test',
+    financialAmount: '500',
+};
+
+// Items → Treatment Codes, added via "Edit Treatment". Confirmed working
+// against the live code search.
+const SAMPLE_TREATMENT_CODE = '63963009';
+
+// Claim Overview → Header Financial Amounts. The claim-level amount is set to
+// the sum of the item lines (1000 + 500), on the assumption the header total
+// should reconcile with them. Same unconfirmed Amount Type as the lines, so
+// one fix to that placeholder covers both.
+const SAMPLE_HEADER_FINANCIAL_AMOUNT = {
+    amountType: SAMPLE_CLAIM_LINE.financialAmountType,
+    amount: String(Number(SAMPLE_CLAIM_LINE.financialAmount) + Number(SAMPLE_CLAIM_LINE_2.financialAmount)),
+};
+
+const SAMPLE_HEADER_FINANCIAL_AMOUNT_2 = {
+    amountType: SAMPLE_CLAIM_LINE.financialAmountType_2,
+    amount: String(Number(SAMPLE_CLAIM_LINE.financialAmount_2) + Number(SAMPLE_CLAIM_LINE_2.financialAmount)),
+};
+test.beforeEach(async ({ landingPage, logger }) => {
     await logger.step('NAVIGATE TO LOGIN PAGE', async () => {
         await logger.info(`Opening URL: ${process.env.BASE_URL}`);
-        await loginPage.navigate();
+        await landingPage.navigate(uiEndPoints.landing);
     });
 });
 
 test.describe('Core Claims - Manual Claim Capture', () => {
-    test('Navigates to the Claims Capture page', async ({ loginPage, microsoftLoginPage, landingPage, logger }) => {
-        await logger.step('LOGIN_VIA_MICROSOFT_SSO', async () => {
-            await loginPage.login(test_credentials.valid_username_1);
-            await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1
-            );
-            await microsoftLoginPage.expectRedirectedBackToApp();
+    test('Navigates to the Claims Capture page', async ({ account, loginPage, landingPage, logger }) => {
+        // Already signed in to Microsoft: the `setup` project (tests/auth.setup.ts)
+        // saved the session this test starts from, so no password or OTP here.
+        await logger.step('SIGN_IN_WITH_SAVED_SESSION', async () => {
+            await loginPage.signInIfPrompted(account.username);
+            await landingPage.expectLandingPageVisible();
         });
 
         let coreClaimsPage!: Page;
@@ -152,8 +199,65 @@ test.describe('Core Claims - Manual Claim Capture', () => {
             await claimCaptureFormPage.addProvider(SAMPLE_PROVIDER);
         });
 
+        await logger.step('ADD_HEADER_FINANCIAL_AMOUNT', async () => {
+            await claimCaptureFormPage.addHeaderFinancialAmount(
+                SAMPLE_HEADER_FINANCIAL_AMOUNT_2.amountType,
+                SAMPLE_HEADER_FINANCIAL_AMOUNT_2.amount
+            );
+
+        });
+        await logger.step('ADD_COVERED_PROVIDER 2', async () =>{
+                await claimCaptureFormPage.addHeaderFinancialAmount(
+                SAMPLE_HEADER_FINANCIAL_AMOUNT.amountType,
+                SAMPLE_HEADER_FINANCIAL_AMOUNT.amount
+            );
+        })
+        
         await logger.step('CLICK_NEXT_TO_DISCHARGE_SUMMARY', async () => {
             await claimCaptureFormPage.clickNext();
+            await claimCaptureFormPage.expectDischargeSummaryVisible();
+        });
+
+        // TODO: add the Diagnosis codes via "Edit Diagnosis" once its editor's
+        // DOM is captured — it wasn't rendered in the Discharge Summary snapshot.
+        await logger.step('FILL_DISCHARGE_SUMMARY', async () => {
+            await claimCaptureFormPage.fillDiagnosisDescription(SAMPLE_DIAGNOSIS_DESCRIPTION);
+        });
+
+        await logger.step('CLICK_NEXT_TO_ITEMS', async () => {
+            await claimCaptureFormPage.clickNext();
+            // await claimCaptureFormPage.expectItemsVisible();
+        });
+
+        await logger.step('ADD_ITEM_LINE_2', async () => {
+            await claimCaptureFormPage.addItem(SAMPLE_CLAIM_LINE_2);
+            // await page.pause();
+        });
+
+        // Applies to the line still selected after ADD_ITEM_LINE_2 (Line 2).
+        await logger.step('ADD_TREATMENT_CODE_LINE_2', async () => {
+            await claimCaptureFormPage.addTreatmentCode(SAMPLE_TREATMENT_CODE);
+        });
+
+
+        await logger.step('CLICK_NEXT_TO_REVIEW', async () => {
+            await claimCaptureFormPage.clickNext();
+            await claimCaptureFormPage.expectReviewVisible();
+        });
+
+        // Before the ready-to-submit check, so the draft is kept even when
+        // blocking validations fail that step — it can then be reopened from
+        // the drafts list to see what was captured.
+        await logger.step('SAVE_DRAFT', async () => {
+            await claimCaptureFormPage.saveDraft();
+            await claimCaptureFormPage.expectDraftSaved();
+        });
+
+        // Stops short of clicking Submit Claim: that creates a real claim in
+        // the target environment, and the post-submit screen hasn't been captured.
+        await logger.step('VERIFY_REVIEW_READY_TO_SUBMIT', async () => {
+            await claimCaptureFormPage.expectNoBlockingValidations();
+            await claimCaptureFormPage.expectSubmitClaimEnabled();
         });
     });
 });

@@ -19,19 +19,37 @@ function requireEnv(name: string): string {
   return value;
 }
 
-export const test_credentials = {
-  valid_username_1: requireEnv('VALID_USERNAME_1'),
-  valid_password_1: requireEnv('VALID_PASSWORD_1'),
-  // Getter, not a plain property: playwright.config.ts is evaluated for every
-  // `npx playwright test` invocation, so an eager requireEnv() here would break
-  // commands that never touch the TOTP flow — e.g. the session-reuse spikes in
-  // tests/auth.save-session.ts and auth.verify-session.ts, which exist
-  // specifically to avoid needing this secret.
-  // Deferring the check to first access keeps the fail-loud behavior for
-  // whichever test actually reads it, without punishing every other run.
-  get valid_otp_secret_1(): string {
-    return requireEnv('VALID_OTP_SECRET_1');
-  },
+export type TestAccount = {
+  readonly username: string;
+  readonly password: string;
+  readonly otpSecret: string;
+};
+
+function accountFromEnv(n: number): TestAccount {
+  return {
+    username: requireEnv(`VALID_USERNAME_${n}`),
+    password: requireEnv(`VALID_PASSWORD_${n}`),
+    // Getter, not a plain property: playwright.config.ts is evaluated for every
+    // `npx playwright test` invocation, so an eager requireEnv() here would break
+    // commands that never touch the TOTP flow — e.g. the `db` project, or a
+    // `--no-deps` run that reuses an already-saved session instead of signing in.
+    // Deferring the check to first access keeps the fail-loud behavior for
+    // whichever test actually reads it, without punishing every other run.
+    get otpSecret(): string {
+      return requireEnv(`VALID_OTP_SECRET_${n}`);
+    },
+  };
+}
+
+// The Microsoft SSO test accounts, one per parallel worker: `workers` below is
+// set to this length, and base.fixture.ts binds worker N to test_accounts[N]
+// (via parallelIndex) along with its own saved session, storageStateFor(N).
+// Account 1 is required; _2, _3, ... are picked up while VALID_USERNAME_n is
+// set, stopping at the first gap — so a .env holding only your own account
+// still runs, just on one worker.
+export const test_accounts: TestAccount[] = [accountFromEnv(1)];
+for (let n = 2; process.env[`VALID_USERNAME_${n}`]; n++) {
+  test_accounts.push(accountFromEnv(n));
 }
 
 // `??` only catches null/undefined, so `FOO_PORT=` (present but empty — an easy
@@ -106,10 +124,18 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  ...(process.env.CI ? { workers: 1 } : {}),
+  // One worker per test account, locally and on CI. This cap is what keeps two
+  // workers from ever signing in as the same account at once (see
+  // test_accounts above) — to run more workers, add accounts, don't raise this.
+  workers: test_accounts.length,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: [
+    // Explicit terminal reporter. Without one, Playwright adds its `line`
+    // reporter, whose live progress line (test › step › action) prints as a
+    // new line per step wherever the output can't redraw in place (VS Code's
+    // output panes, CI logs), burying SmartLogger's lines under duplicates.
+    // `list` prints one line per finished test and passes our logs through as-is.
+    ['list'],
     ['html'],
     ['allure-playwright', {
       resultsDir: 'allure-results',
@@ -134,8 +160,19 @@ export default defineConfig({
       args: ['--start-maximized'], // Tells browser to open maximized
     },
     navigationTimeout: 15_000,
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on-first-retry',
+    // Attach a final-state screenshot to the report only when a test fails. Playwright
+    // attaches it to the test result, and the allure-playwright reporter above maps that
+    // into the Allure report too — so it shows up in BOTH the HTML and Allure reports with
+    // no extra code. A single frame, so its PII footprint is far smaller than a trace.
+    screenshot: 'only-on-failure',
+    // Traces locally, NEVER in CI. A trace bundles full DOM snapshots and network payloads
+    // of authenticated claim/member pages — the richest PII artifact — and both CI pipelines
+    // upload the reports (see .github/workflows/playwright.yml, azure-pipelines.yml), so a CI
+    // trace would publish that PII into a shared artifact (the exposure once closed in
+    // .claude/review-tracking/main.md:26). Off in CI by design; `retain-on-failure` locally
+    // gives a trace on the first failure without needing a retry (local `retries: 0`).
+    // See https://playwright.dev/docs/trace-viewer
+    trace: process.env.CI ? 'off' : 'retain-on-failure',
   },
 
   /* Configure projects for major browsers */
@@ -149,20 +186,53 @@ export default defineConfig({
       testMatch: /Database\.spec\.ts/,
     },
 
-    // Same reasoning as the `db` project above: these specs each drive a
-    // real browser login, but their actual upload is a plain HTTP call
-    // (Azure Blob), not Core Claims page objects. Kept as their own project
-    // rather than folded into `db` since it's a different kind of external
-    // dependency (a live, time-limited SAS credential against a real
+    // Signs in each test account ONCE (password + generated TOTP) and saves its
+    // session to storageStateFor(index); `api` and `msedge` depend on it and
+    // start every test already signed in as their worker's account (the
+    // `storageState` override in base.fixture.ts). One live MFA sign-in per
+    // account per run, however many tests — repeat sign-ins of one account would
+    // otherwise submit the same single-use OTP code within one 30s window, and
+    // Microsoft rejects the repeat. Different accounts have different TOTP
+    // secrets, so their setups can safely run in parallel.
+    // Skip it with `--no-deps` to reuse a still-valid session from a prior run.
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+      use: {
+        ...devices['Desktop Edge'],
+        channel: 'msedge',
+      },
+    },
+
+    // Same reasoning as the `db` project above: these specs open the Azure
+    // Portal in a browser to mint a SAS, but their actual upload is a plain
+    // HTTP call (Azure Blob), not Core Claims page objects. Kept as their own
+    // project rather than folded into `db` since it's a different kind of
+    // external dependency (a live, time-limited SAS credential against a real
     // production endpoint, not a database connection).
     {
       name: 'api',
-      testMatch: /(IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+      testMatch: /(IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+      dependencies: ['setup'],
+    },
+
+    // Session-reuse check against Outlook on the web (tests/test.auth.spec.ts).
+    // Its own project (and excluded from msedge below) so it runs once, alone.
+    // Gated by AUTH_SPIKE inside the spec so a plain full run doesn't spend an
+    // extra live MFA sign-in on it.
+    {
+      name: 'auth',
+      testMatch: /test\.auth\.spec\.ts/,
+      use: {
+        ...devices['Desktop Edge'],
+        channel: 'msedge',
+      },
     },
 
     {
       name: 'msedge',
-      testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+      testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
+      dependencies: ['setup'],
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
@@ -172,19 +242,19 @@ export default defineConfig({
 
     // {
     //   name: 'firefox',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Firefox'] },
     // },
 
     // {
     //   name: 'webkit',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Safari'] },
     // },
 
     // {
     //   name: 'chrome',
-    //   testIgnore: /(Database|IntakeUpload|ActionMemoUpload|DisapprovedMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload)\.spec\.ts/,
+    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     // },
 

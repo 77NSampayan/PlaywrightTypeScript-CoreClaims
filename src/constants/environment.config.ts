@@ -1,8 +1,7 @@
 // ─────────────────────────────────────────────
 //  environment.config.ts
-//  Execution-environment configuration for the
-//  session-reuse authentication spike
-//  (see tests/auth.save-session.ts).
+//  Execution-environment configuration for
+//  signed-in session reuse (see tests/auth.setup.ts).
 // ─────────────────────────────────────────────
 
 import path from 'path';
@@ -14,11 +13,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 /**
- * Where an authenticated Playwright session is persisted for reuse.
+ * Where the authenticated session of test account `index` (0-based, matching
+ * `test_accounts` in playwright.config.ts) is persisted for reuse — written by
+ * tests/auth.setup.ts, loaded by the worker with that `parallelIndex`.
  *
  * Already covered by `/playwright/.auth/` in .gitignore, and it must stay that
- * way: this file is a bearer token that has *already satisfied MFA*, so anyone
+ * way: each file is a bearer token that has *already satisfied MFA*, so anyone
  * holding it bypasses the second factor entirely. Treat it as more sensitive
  * than the account password.
  */
-export const STORAGE_STATE = path.join(repoRoot, 'playwright', '.auth', 'session.json');
+export function storageStateFor(index: number): string {
+    return path.join(repoRoot, 'playwright', '.auth', `session-${index}.json`);
+}
+/**
+ * Session saved by tests/test.auth.spec.ts after signing in to Outlook on the web.
+ *
+ * Same gitignored folder and same warning as {@link storageStateFor} — and this
+ * one also opens the account's mailbox, so it must never leave the machine.
+ */
+export const OUTLOOK_STORAGE_STATE = path.join(repoRoot, 'playwright', '.auth', 'outlook-session.json');

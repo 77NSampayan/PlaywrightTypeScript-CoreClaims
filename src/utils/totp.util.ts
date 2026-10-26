@@ -8,6 +8,14 @@
 
 import { TOTP } from 'otpauth';
 
+const PERIOD_SECONDS = 30;
+
+/** Milliseconds until the current TOTP code rolls over to the next one. */
+export function msUntilNextTotpPeriod(): number {
+    const periodMs = PERIOD_SECONDS * 1000;
+    return periodMs - (Date.now() % periodMs);
+}
+
 export function generateTOTP(secret: string, label?: string): string {
     const totp = new TOTP({
         issuer: 'Microsoft',
@@ -15,7 +23,7 @@ export function generateTOTP(secret: string, label?: string): string {
         secret,
         algorithm: 'SHA1',
         digits: 6,
-        period: 30,
+        period: PERIOD_SECONDS,
     });
 
     return totp.generate();

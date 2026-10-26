@@ -1,6 +1,7 @@
 import type { Page, Locator } from "@playwright/test";
 import { BasePage } from "@base/base.page.ts";
-import { generateTOTP } from "@utils/totp.util.ts";
+import { generateTOTP, msUntilNextTotpPeriod } from "@utils/totp.util.ts";
+import { uiEndPoints } from "@constants/endpoint.config.ts";
 
 export class MicrosoftLoginPage extends BasePage {
 
@@ -83,6 +84,14 @@ export class MicrosoftLoginPage extends BasePage {
         }
     };
 
+    async waitForFreshOtpCode(): Promise<void> {
+        // A TOTP code is single-use: Microsoft rejects one already redeemed in
+        // the same 30s window — e.g. by tests/auth.setup.ts signing in moments
+        // before. Waiting for the next window guarantees an unused code. A hard
+        // wait is deliberate: no page signal exists for "a new code is due".
+        await this.waitForTimeout(msUntilNextTotpPeriod());
+    };
+
     async login(email: string, password: string, otpSecret: string): Promise<void> {
         await this.enterEmail(email);
         await this.enterPassword(password);
@@ -94,5 +103,20 @@ export class MicrosoftLoginPage extends BasePage {
 
     async expectRedirectedBackToApp(): Promise<void> {
         await this.waitForURL((url) => !url.hostname.includes('microsoftonline.com'));
+    };
+
+    async expectSignInPrompted(): Promise<void> {
+        await this.elementAssert.toBeVisible(this.emailField, 'Microsoft email field', { timeout: 30_000 });
+    };
+
+    async expectSessionCookiePresent(): Promise<void> {
+        // ESTSAUTH / ESTSAUTHPERSISTENT are Microsoft's own SSO session cookies —
+        // the ones that let it skip the password and OTP for an already
+        // signed-in browser. Checked by name only; values are never read.
+        const cookieNames = await this.getCookieNames(uiEndPoints.microsoftLogin);
+        await this.assert.toBeTruthy(
+            cookieNames.some((name) => name.startsWith('ESTSAUTH')),
+            'Microsoft SSO session cookie (ESTSAUTH*) in this context'
+        );
     };
 };

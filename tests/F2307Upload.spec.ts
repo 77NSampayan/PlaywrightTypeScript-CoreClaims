@@ -1,34 +1,40 @@
 import { readdir } from 'fs/promises';
+import path from 'path';
 import { test } from '@fixtures/base.fixture.ts';
-import { test_credentials } from '@root/playwright.config.ts';
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 import { checkSasNotExpired, scopeToFolder, uploadFileToBlob } from '@utils/blobUpload.util.ts';
+import { getChannelDir } from '../scripts/generate-intake-batches.ts';
 import { generateF2307 } from '../scripts/generate-f2307.ts';
 
-const F2307_DIR = 'test-data/f2307';
 // Back under "testblob" (not "claimsblob", like Payment Journal/Disbursement)
 // — same container as the original OPEML/memo uploads, new top-level folder.
 const F2307_FOLDER = 'testblob/F2307 Output/COM_CHECK';
 
+// F2307 now lives in ComCheck's shared test-data/COM CHECK/<date>/ folder,
+// alongside that channel's intake file, memos, and Disbursement File — the
+// "F2307_" filename prefix picks it out from the memo PDFs also sitting there.
+const isF2307Filename = (f: string) => f.startsWith('F2307_') && f.toLowerCase().endsWith('.pdf');
+
 async function listF2307Files(): Promise<string[]> {
+    const dir = getChannelDir('COMCHECK');
+
     let files: string[];
     try {
-        files = await readdir(F2307_DIR);
+        files = (await readdir(dir)).filter(isF2307Filename);
     } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') files = [];
         else throw err;
     }
 
-    files = files.filter((f) => f.toLowerCase().endsWith('.pdf'));
     if (files.length === 0) {
         await generateF2307();
-        files = (await readdir(F2307_DIR)).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        files = (await readdir(dir)).filter(isF2307Filename);
     }
 
     if (files.length === 0) {
-        throw new Error(`No F2307 files found under ${F2307_DIR}/ even after generating.`);
+        throw new Error(`No F2307 files found under ${dir}/ even after generating.`);
     }
-    return files.map((f) => `${F2307_DIR}/${f}`);
+    return files.map((f) => path.join(dir, f));
 }
 
 test.describe('Claims Intake — F2307 Upload (ComCheck)', () => {
@@ -36,19 +42,15 @@ test.describe('Claims Intake — F2307 Upload (ComCheck)', () => {
     // same precedent as the other upload specs. Only runs under the `api`
     // project (see playwright.config.ts).
     test('Generates a fresh SAS via the Portal, then uploads the ComCheck F2307 file through the API', async ({
-        microsoftLoginPage,
         azureStorageSasPage,
         assert,
         logger,
     }) => {
-        await logger.step('LOGIN_TO_AZURE_PORTAL', async () => {
+        // Already signed in: the `setup` project (tests/auth.setup.ts) saved the
+        // Microsoft session this test starts from, so no password or OTP here.
+        await logger.step('OPEN_AZURE_PORTAL_WITH_SAVED_SESSION', async () => {
             await azureStorageSasPage.navigate(uiEndPoints.azureStorageSas);
-            await microsoftLoginPage.login(
-                test_credentials.valid_username_1,
-                test_credentials.valid_password_1,
-                test_credentials.valid_otp_secret_1
-            );
-            await microsoftLoginPage.expectRedirectedBackToApp();
+            await azureStorageSasPage.expectSasBladeVisible();
         });
 
         let blobServiceSasUrl = '';

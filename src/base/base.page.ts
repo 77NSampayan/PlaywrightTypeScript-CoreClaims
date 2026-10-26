@@ -30,6 +30,8 @@ import type {
     WaitForResponseOptions,
     WaitForRequestUrl,
     WaitForRequestOptions,
+    StorageStateOptions,
+    CookieUrls,
 } from '@constants/page-types.config.ts'
 import { uiEndPoints } from '@constants/endpoint.config.ts';
 
@@ -350,6 +352,78 @@ export abstract class BasePage {
             () => this.page.viewportSize(),
             (size) => size ? `Viewport: ${size.width}x${size.height}` : 'Viewport: null (full window)',
             'Failed to get viewport size'
+        );
+    }
+
+    /**
+     * Saves this page's browser context (cookies, localStorage and, with
+     * `indexedDB: true`, IndexedDB) so a later context can start already
+     * signed in via the `storageState` option. sessionStorage is never saved.
+     *
+     * Only the target path is logged — the state itself is a bearer
+     * credential and must never reach the console or the report.
+     *
+     * @param options - Playwright `context.storageState()` options (`path`, `indexedDB`).
+     * @returns Resolves once the state is captured (and written, if `path` is set).
+     *
+     * @example
+     * ```ts
+     * await outlookMailPage.saveStorageState({ path: OUTLOOK_STORAGE_STATE, indexedDB: true });
+     * ```
+     */
+    async saveStorageState(options?: StorageStateOptions): Promise<void> {
+        await this.logger.action(
+            `Saving session state${options?.path ? ` to ${options.path}` : ''}`,
+            async () => {
+                await this.page.context().storageState(options);
+            },
+            'Session state saved',
+            'Failed to save session state'
+        );
+    }
+
+    /**
+     * Returns the **names** of the cookies in this page's browser context —
+     * never their values, which for auth cookies are bearer credentials. Only
+     * the count is logged.
+     *
+     * @param urls - Limit to cookies that would be sent to these URL(s). Omit for all.
+     * @returns Cookie names, in the order Playwright reports them.
+     *
+     * @example
+     * ```ts
+     * const names = await microsoftLoginPage.getCookieNames(uiEndPoints.microsoftLogin);
+     * ```
+     */
+    async getCookieNames(urls?: CookieUrls): Promise<string[]> {
+        return this.logger.action(
+            `Getting cookie names${urls ? ` for ${urls}` : ''}`,
+            async () => (await this.page.context().cookies(urls)).map((cookie) => cookie.name),
+            (names) => `Found ${names.length} cookie(s)`,
+            'Failed to get cookies'
+        );
+    }
+
+    /**
+     * Deletes every cookie in this page's browser context — e.g. to discard a
+     * saved session that was rejected, so the next sign-in starts clean rather
+     * than from a half-valid Microsoft session.
+     *
+     * @returns Resolves once the cookies are cleared.
+     *
+     * @example
+     * ```ts
+     * await landingPage.clearCookies();
+     * ```
+     */
+    async clearCookies(): Promise<void> {
+        await this.logger.action(
+            'Clearing all cookies',
+            async () => {
+                await this.page.context().clearCookies();
+            },
+            'Cookies cleared',
+            'Failed to clear cookies'
         );
     }
 

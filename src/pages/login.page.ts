@@ -22,6 +22,21 @@ export class LoginPage extends BasePage {
         await this.elements.click(this.signInButton, 'sign in button');
     };
 
+    async signInIfPrompted(email: string): Promise<void> {
+        // With a saved session the portal may still ask: its own token can live
+        // in sessionStorage, which a saved session cannot restore. Clicking
+        // Sign in then bounces through Microsoft, which completes silently from
+        // the saved SSO cookie — no password, no OTP.
+        const prompted = await this.elements.waitForVisibleSoft(this.emailField, 'email field', { timeout: 5_000 });
+
+        if (!prompted) {
+            this.logger.info('Portal session restored — no sign-in prompt shown.');
+            return;
+        }
+
+        await this.login(email);
+    };
+
     // ─── Assertions ───────────────────────────
 
     async expectLoginPageVisible(): Promise<void> {

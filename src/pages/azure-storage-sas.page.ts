@@ -56,6 +56,13 @@ export class AzureStorageSasPage extends BasePage {
 
     // ─── Assertions ───────────────────────────
 
+    async expectSasBladeVisible(): Promise<void> {
+        // Proves the saved session got us into the Portal: had it not carried,
+        // Microsoft's sign-in page would be waiting for input instead. Generous
+        // timeout — the Portal's first load (plus any silent SSO hop) is slow.
+        await this.elementAssert.toBeVisible(this.serviceCheckbox, 'Service resource type checkbox', { timeout: 60_000 });
+    };
+
     async expectGenerateButtonEnabled(): Promise<void> {
         await this.elementAssert.toBeEnabled(this.generateButton, 'Generate SAS and connection string button');
     };
