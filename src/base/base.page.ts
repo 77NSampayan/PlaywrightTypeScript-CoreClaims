@@ -6,7 +6,7 @@
 //  in child page methods.
 // ─────────────────────────────────────────────
 
-import { type Page, type Response, type Request, expect } from '@playwright/test';
+import { type Page, type Response, type Request, expect, errors } from '@playwright/test';
 import type { SmartLogger } from '@utils/logger/SmartLogger.util.ts';
 import { logger } from '@utils/logger/SmartLogger.util.ts';
 import { ElementActions } from './ElementActions.util.ts';
@@ -513,6 +513,44 @@ export abstract class BasePage {
             () => this.page.waitForURL(url, options),
             () => `URL matched. Current URL: ${this.page.url()}`,
             `URL did not match: ${url}`
+        );
+    }
+
+    /**
+     * Soft wait: resolves `true` if the page URL matches within the timeout,
+     * `false` if it never does. Unlike {@link waitForURL} this never throws on
+     * a timeout — it is for branching on where a redirect settled (e.g. did a
+     * saved session sign in silently?), not for URLs that must be reached.
+     * Any other error (closed page, bad pattern) still propagates.
+     *
+     * @param url - URL pattern to match (string, glob, `RegExp`, or `(url) => boolean`).
+     * @param description - Human-readable name for logs/report — a predicate
+     *                      has no readable form of its own.
+     * @param options - Playwright `waitForURL()` options; pass a short `timeout`
+     *                  so a non-match doesn't cost the full default wait.
+     * @returns `true` if the URL matched, `false` if it timed out without matching.
+     *
+     * @example
+     * ```ts
+     * const left = await this.waitForURLSoft((url) => url.hostname !== 'login.example.com', 'redirect off sign-in', { timeout: 20_000 });
+     * ```
+     */
+    async waitForURLSoft(url: WaitForURLPattern, description: string, options?: WaitForURLOptions): Promise<boolean> {
+        const waited = options?.timeout ? `${options.timeout}ms` : 'the default timeout';
+
+        return this.logger.action(
+            `Waiting up to ${waited} for optional URL "${description}"`,
+            async () => {
+                try {
+                    await this.page.waitForURL(url, options);
+                    return true;
+                } catch (err) {
+                    if (err instanceof errors.TimeoutError) return false;
+                    throw err;
+                }
+            },
+            (matched) => `Optional URL "${description}" ${matched ? `matched. Current URL: ${this.page.url()}` : 'did not match'}`,
+            `Failed while waiting for optional URL "${description}"`
         );
     }
 

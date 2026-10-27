@@ -73,11 +73,14 @@ function cellToDateSlash(value: ExcelJS.CellValue): string {
     return String(value ?? '').trim();
 }
 
-export async function readFailedRows(): Promise<FailedRow[]> {
+// `date` picks which day's channel folders to scan — defaults to today. The
+// Control Code Tracker passes each code's own folder date, so a pipeline
+// that crosses midnight still finds yesterday's intake files.
+export async function readFailedRows(date?: Date): Promise<FailedRow[]> {
     const rows: FailedRow[] = [];
 
     for (const paymentMode of ALL_PAYMENT_MODES) {
-        const channelDir = getChannelDir(paymentMode);
+        const channelDir = getChannelDir(paymentMode, date);
 
         let dirEntries: string[];
         try {
@@ -314,28 +317,43 @@ async function buildDisapprovalMemo(row: FailedRow, today: Date): Promise<Uint8A
     return doc.save();
 }
 
+export type GeneratedMemoPair = { controlCode: string; paymentMode: PaymentMode; amPath: string; dmPath: string };
+
 // Exported so tests/ClaimMemoUpload.spec.ts can call it directly (generate
 // memos on demand when none exist yet for today) instead of requiring a
 // separate manual `node scripts/generate-claim-memos.ts` step.
-export async function generateClaimMemos(): Promise<void> {
+//
+// `controlCodes` + `date` (both optional; the CLI passes neither) narrow it
+// to the codes the Control Code Tracker says are due for memos, read from
+// their own channel/date folder rather than today's. Returns what it wrote,
+// so the caller uploads exactly those files.
+export async function generateClaimMemos(options: { controlCodes?: string[]; date?: Date } = {}): Promise<GeneratedMemoPair[]> {
     const filter = getPaymentModeFilter();
-    let failedRows = await readFailedRows();
+    let failedRows = await readFailedRows(options.date);
     if (filter) {
         failedRows = failedRows.filter((row) => row.paymentMode === filter);
+    }
+    if (options.controlCodes) {
+        const wanted = new Set(options.controlCodes);
+        failedRows = failedRows.filter((row) => wanted.has(row.controlCode));
+        if (failedRows.length === 0) {
+            throw new Error(`No Action Memo = "Y" rows found for ${options.controlCodes.join(', ')} — nothing to generate memos from.`);
+        }
     }
 
     if (failedRows.length === 0) {
         const scope = filter ? `Action Memo = "Y" rows for ${filter}` : 'Action Memo = "Y" rows';
         console.log(`No ${scope} found — run generate-intake-batches.ts first.`);
-        return;
+        return [];
     }
 
     const today = new Date();
+    const written: GeneratedMemoPair[] = [];
 
     for (const row of failedRows) {
         const visitDateCompact = slashToCompact(row.visitDateSlash);
         const baseName = `${row.controlCode}_${row.memberName}_${visitDateCompact}`;
-        const outDir = getChannelDir(row.paymentMode);
+        const outDir = getChannelDir(row.paymentMode, options.date);
         await mkdir(outDir, { recursive: true });
 
         const amBytes = await buildActionMemo(row, today);
@@ -347,7 +365,10 @@ export async function generateClaimMemos(): Promise<void> {
         const dmPath = path.join(outDir, `${baseName}_DM.pdf`);
         await writeFile(dmPath, dmBytes);
         console.log(`Wrote Disapproval Memo: ${dmPath}`);
+
+        written.push({ controlCode: row.controlCode, paymentMode: row.paymentMode, amPath, dmPath });
     }
+    return written;
 }
 
 // Runs automatically only when invoked directly (`node scripts/generate-claim-memos.ts`),

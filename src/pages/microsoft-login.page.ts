@@ -3,6 +3,10 @@ import { BasePage } from "@base/base.page.ts";
 import { generateTOTP, msUntilNextTotpPeriod } from "@utils/totp.util.ts";
 import { uiEndPoints } from "@constants/endpoint.config.ts";
 
+// Signed-in means Microsoft has handed off to whatever app asked — the
+// portal, Outlook, or Microsoft 365 when sign-in was opened directly.
+const leftMicrosoftSignIn = (url: URL): boolean => !url.hostname.includes('microsoftonline.com');
+
 export class MicrosoftLoginPage extends BasePage {
 
     protected readonly emailField: Locator;
@@ -35,6 +39,17 @@ export class MicrosoftLoginPage extends BasePage {
     };
 
     // ─── Actions ──────────────────────────────
+
+    async open(): Promise<void> {
+        // Microsoft's sign-in on its own, with no app in front of it.
+        await this.navigate(uiEndPoints.microsoftSignIn);
+    };
+
+    async isSignedInSilently(timeout: number): Promise<boolean> {
+        // Soft: false (not a failure) when a saved session is rejected — Microsoft
+        // then stays on its sign-in page waiting for input instead of handing off.
+        return this.waitForURLSoft(leftMicrosoftSignIn, 'redirect off Microsoft sign-in', { timeout });
+    };
 
     async enterEmail(email: string): Promise<void> {
         await this.elements.fill(this.emailField, email, 'Microsoft email field', { mask: true });
@@ -102,7 +117,7 @@ export class MicrosoftLoginPage extends BasePage {
     // ─── Assertions ───────────────────────────
 
     async expectRedirectedBackToApp(): Promise<void> {
-        await this.waitForURL((url) => !url.hostname.includes('microsoftonline.com'));
+        await this.waitForURL(leftMicrosoftSignIn);
     };
 
     async expectSignInPrompted(): Promise<void> {

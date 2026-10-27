@@ -20,6 +20,11 @@ export const uiEndPoints = {
     // Absolute URL — Microsoft's sign-in origin, where its SSO session
     // cookies live (used to check a saved session actually carries one).
     microsoftLogin: 'https://login.microsoftonline.com',
+    // Absolute URL — Microsoft's own sign-in entry point, opened directly by
+    // tests/auth.setup.ts so no app is involved. It redirects (via office.com)
+    // to login.microsoftonline.com, so the SSO cookies land on the same host
+    // the portal signs in through, and it settles on Microsoft 365 afterwards.
+    microsoftSignIn: 'https://login.microsoft.com',
 } as const
 
 export type UIEndPoints = typeof uiEndPoints;

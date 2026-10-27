@@ -10,6 +10,7 @@ import { MicrosoftLoginPage } from '@pages/microsoft-login.page.ts';
 import { LandingPage } from '@pages/landing.page.ts';
 import { AzureStorageSasPage } from '@pages/azure-storage-sas.page.ts';
 import { OutlookMailPage } from '@pages/outlook-mail.page.ts';
+import { ControlCodeTracker } from '@utils/tracker/ControlCodeTracker.util.ts';
 
 
 export type TestFixtures = {
@@ -26,6 +27,10 @@ export type TestFixtures = {
     landingPage: LandingPage;
     azureStorageSasPage: AzureStorageSasPage;
     outlookMailPage: OutlookMailPage;
+    // The Control Code Tracker workbook (test-data/control-code-tracker.xlsx):
+    // which codes each pipeline stage may process now, and where to record
+    // what happened. Stateless — every call re-reads the file.
+    tracker: ControlCodeTracker;
 };
 
 export type WorkerFixtures = {
@@ -170,6 +175,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
     outlookMailPage: async ({ page }, use) => {
         await use(new OutlookMailPage(page));
+    },
+
+    // ── Test-scoped: Control Code Tracker ─────────────────────────
+    // No page dependency, so the browser-less `db` project can use it too.
+    tracker: async ({}, use) => {
+        await use(new ControlCodeTracker());
     },
 });
 

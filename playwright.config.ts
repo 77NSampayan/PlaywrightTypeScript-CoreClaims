@@ -180,10 +180,12 @@ export default defineConfig({
     // DB-backed specs (Database.spec.ts) touch no page/browser — running them
     // here, and excluding them from the browser projects below via
     // testIgnore, means one run of each query instead of three, and no
-    // browser launch just to print the configInfo banner.
+    // browser launch just to print the configInfo banner. Same for the
+    // Control Code Tracker's DE wait checks (PipelineSignalCheck.spec.ts) and
+    // the tracker's own rules spec (ControlCodeTracker.spec.ts — no DB either).
     {
       name: 'db',
-      testMatch: /Database\.spec\.ts/,
+      testMatch: /(Database|PipelineSignalCheck|ControlCodeTracker)\.spec\.ts/,
     },
 
     // Signs in each test account ONCE (password + generated TOTP) and saves its
@@ -231,7 +233,7 @@ export default defineConfig({
 
     {
       name: 'msedge',
-      testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
+      testIgnore: /(Database|PipelineSignalCheck|ControlCodeTracker|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Edge'],
@@ -242,19 +244,19 @@ export default defineConfig({
 
     // {
     //   name: 'firefox',
-    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
+    //   testIgnore: /(Database|PipelineSignalCheck|ControlCodeTracker|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Firefox'] },
     // },
 
     // {
     //   name: 'webkit',
-    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
+    //   testIgnore: /(Database|PipelineSignalCheck|ControlCodeTracker|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Safari'] },
     // },
 
     // {
     //   name: 'chrome',
-    //   testIgnore: /(Database|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
+    //   testIgnore: /(Database|PipelineSignalCheck|ControlCodeTracker|IntakeUpload|ClaimMemoUpload|PaymentJournalUpload|F2307Upload|ReturnFileUpload|test\.auth)\.spec\.ts/,
     //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     // },
 
