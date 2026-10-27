@@ -1,0 +1,42 @@
+name: Pipeline state
+description: >-
+  Restores or saves the OP pipeline's git-ignored state (tracker, intake
+  files, filename counter) on the self-hosted runner between runs.
+  See README § Pipeline state on the runner.
+
+inputs:
+  mode:
+    description: 'restore (start of a run) or save (end of a run)'
+    required: true
+  initialize:
+    description: 'restore only: create the state store if none exists (first run on a runner)'
+    required: false
+    default: 'false'
+  state-root:
+    description: 'Folder holding op-pipeline\ and op-pipeline-snapshots\. Empty = %USERPROFILE%\claims-qa-state'
+    required: false
+    default: ''
+  snapshot-keep:
+    description: 'restore only: snapshots kept after pruning'
+    required: false
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - shell: powershell
+      # Inputs go through env, not ${{ }} inside the script text, so a value
+      # can never be read as PowerShell code.
+      env:
+        STATE_MODE: ${{ inputs.mode }}
+        STATE_INITIALIZE: ${{ inputs.initialize }}
+        STATE_ROOT: ${{ inputs.state-root }}
+        STATE_SNAPSHOT_KEEP: ${{ inputs.snapshot-keep }}
+      run: |
+        & (Join-Path $env:GITHUB_ACTION_PATH 'pipeline-state.ps1') `
+          -Mode $env:STATE_MODE `
+          -Initialize $env:STATE_INITIALIZE `
+          -StateRoot $env:STATE_ROOT `
+          -SnapshotKeep ([int]$env:STATE_SNAPSHOT_KEEP) `
+          -Workspace $env:GITHUB_WORKSPACE
+        exit $LASTEXITCODE
