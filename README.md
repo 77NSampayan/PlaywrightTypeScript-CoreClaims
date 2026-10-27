@@ -135,6 +135,74 @@ run under their own `db` project instead of the browser projects — they touch 
 page, so running them under msedge/firefox/webkit too would just be the same
 query three times over.
 
+## OP Teleconsultation pipeline & the Control Code Tracker
+
+Each intake Control Code (`OPEML<date><counter>T`, also the intake file name)
+moves through ten stages over a couple of hours, with DE batch jobs (every 15–30
+min) in between. **`test-data/control-code-tracker.xlsx`** records where every
+code is. Each spec reads it to decide which codes it may process, and writes back
+when a stage starts, passes, fails or times out. The file is created on first
+use, and `test-data/` is gitignored.
+
+| Stage | Run | Eligible when |
+|---|---|---|
+| S0 Intake file creation | `node scripts/generate-intake-batches.ts` (or IntakeUpload's own fallback) | — the generator registers each code as `IN_PROGRESS`, then `PASSED` once its file is written |
+| S1 Intake upload | `tests/IntakeUpload.spec.ts` (`api`) | S0 passed, not yet uploaded |
+| S2 Memo upload | `tests/ClaimMemoUpload.spec.ts` (`api`) | S1 passed and a row has Action Memo = Y (otherwise N/A) |
+| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2 |
+| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed |
+| S5 Payment Journal / Disbursement | `tests/PaymentJournalUpload.spec.ts` (`api`) | S4 passed |
+| S6 Payment processed · S7 EP No / NAV pay ref | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
+| S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed |
+| S9 Transmittal + F2307 | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after S8 |
+| S10 Email | **by hand for now**: set `S10 Status` to `PASSED` | S9 passed |
+
+Creating intake files prints what happened to the tracker as it goes:
+
+```text
+── Intake file creation · RUN-20261026-1630 ──────────────────────────
+[EXECUTING] 6 control code(s) registered in the tracker as S0 IN_PROGRESS
+  ✓ OPEML2026102600001T  DPS       NEGATIVE  2 row(s), 1 Action Memo  → test-data/DPS/10.26.26/OPEML2026102600001T.xlsx
+  ...
+[DONE] 6 intake file(s) created, 0 failed — tracker S0 updated
+```
+
+```bash
+node scripts/generate-intake-batches.ts            # create intake files (S0) — close the tracker in Excel first
+node scripts/init-control-code-tracker.ts          # one line per code: stage, status, what to run next
+npx playwright test --project=db tests/PipelineSignalCheck.spec.ts   # advance every due DE wait
+```
+
+How it behaves:
+
+- **Re-running is always safe.** Every spec only touches codes that are
+  eligible right now. A passed upload is never uploaded again, and a spec with
+  nothing to do is reported as skipped.
+- **Waits are single-pass checks, not sleeps.** Before "Next Check At" a code
+  is left alone. A check that finds nothing before "Wait Deadline" leaves it
+  `WAITING`. A miss after the deadline marks it `TIMED_OUT`: that code stops,
+  other codes carry on, the Event Log keeps the evidence, and the check spec
+  fails. A timeout is never retried, re-uploaded or extended automatically.
+  Change the windows on the **Config** sheet.
+- **`FAILED` is retryable, `TIMED_OUT` is not.** A failed upload never reached
+  the blob, so re-running the spec retries it. A timed-out wait may still be
+  processing in DE, so a person decides what happens next.
+- **One Return File per channel per run.** It carries one code's EP Number,
+  preferring a POSITIVE code. The channel's other due codes are marked
+  `NOT_COVERED` and end there, by design.
+- **Close the file in Excel before running specs.** Specs rebuild the whole
+  workbook on every write, so only cell values survive, not hand formatting.
+  An open file makes a write fail with a clear "close it in Excel" error.
+- **Resetting a code by hand:** with Excel closed afterwards, clear the
+  status of the stage to retry *and every later stage*, then add a Remark. A
+  code whose later stage still says `TIMED_OUT` or `NOT_COVERED` is not
+  re-entered.
+- **Lookups not confirmed yet.** Several DE tables' control-code columns are
+  still [TBC]. The check finds them at run time from `INFORMATION_SCHEMA`. When
+  it can't pin a column down, it writes a Remark (`signal lookup unresolved —
+  confirm by hand`) and leaves the code `WAITING`; it never times the code out
+  for that.
+
 ## Writing test specs
 
 Specs are plain Playwright Test scripts — `test.describe` / `test` / `test.beforeEach` — not Cucumber/Gherkin `.feature` files. There's no separate BDD framework here, but the tests are still capable of reading like BDD scenarios: `logger.step(...)` gives each Given/When/Then-style beat of the flow a named block, both in the console and as a collapsible node in the HTML report/trace viewer.

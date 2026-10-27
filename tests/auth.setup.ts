@@ -6,9 +6,14 @@
 //  from its worker's file, already signed in — so the Core Claims portal and
 //  the Azure Portal both skip the password and OTP.
 //
+//  Signs in at Microsoft directly (uiEndPoints.microsoftSignIn), not through
+//  the portal: what the specs need from the file is Microsoft's SSO cookie.
+//  The portal still gets its own token at the start of each spec
+//  (signInIfPrompted), silently, from that cookie.
+//
 //  Per account:
-//    - saved session exists → open the portal with it. If it loads without a
-//      Microsoft sign-in, re-save it and stop: no password, no OTP.
+//    - saved session exists → open Microsoft sign-in with it. If Microsoft
+//      signs it in without asking, re-save it and stop: no password, no OTP.
 //    - no saved session, or Microsoft rejected it → full sign-in with
 //      password + generated TOTP, then save.
 //  Validity is checked against Microsoft itself, never guessed from the
@@ -19,12 +24,12 @@
 // ─────────────────────────────────────────────
 
 import fs from 'fs';
-import { test as setup, uiEndPoints } from '@fixtures/base.fixture.ts';
+import { test as setup } from '@fixtures/base.fixture.ts';
 import { test_accounts } from '@root/playwright.config.ts';
 import { storageStateFor } from '@constants/environment.config.ts';
 
-// How long the portal gets to load from a saved session before it counts as
-// rejected — covers the silent bounce through Microsoft and back.
+// How long Microsoft gets to sign a saved session in before it counts as
+// rejected — covers the silent bounce through office.com and on to Microsoft 365.
 const SAVED_SESSION_CHECK_TIMEOUT = 20_000;
 
 for (const [index, account] of test_accounts.entries()) {
@@ -39,58 +44,52 @@ for (const [index, account] of test_accounts.entries()) {
         setup.use({ storageState: hasSavedSession ? storageStateFor(index) : { cookies: [], origins: [] } });
 
         // Slot number in the title, never the username — titles are published to the report.
-        setup(`Signs in account #${index + 1} via Microsoft SSO (or reuses its valid saved session)`, async ({ loginPage, microsoftLoginPage, landingPage, logger }) => {
+        setup(`Signs in account #${index + 1} via Microsoft SSO (or reuses its valid saved session)`, async ({ microsoftLoginPage, logger }) => {
             // Full SSO round-trip, MFA included, plus the saved-session check before it.
             setup.setTimeout(150_000);
 
             if (hasSavedSession) {
                 let sessionStillValid = false;
 
-                // The portal may still show its own email prompt (its token can live in
-                // sessionStorage, which a saved session cannot restore). Submitting it
-                // bounces through Microsoft, which completes silently only if it still
-                // accepts the saved SSO cookie — otherwise it stops on its sign-in page
-                // and the landing page never appears.
+                // Microsoft completes the sign-in on its own only if it still accepts
+                // the saved SSO cookie — otherwise it stops on its sign-in page.
                 await logger.step('VALIDATE_SAVED_SESSION', async () => {
-                    await landingPage.navigate(uiEndPoints.landing);
-                    await loginPage.signInIfPrompted(account.username);
-                    sessionStillValid = await landingPage.isLandingPageVisible(SAVED_SESSION_CHECK_TIMEOUT);
+                    await microsoftLoginPage.open();
+                    sessionStillValid = await microsoftLoginPage.isSignedInSilently(SAVED_SESSION_CHECK_TIMEOUT);
                 });
 
                 if (sessionStillValid) {
-                    // Re-saved, not just kept: picks up any tokens Microsoft or the portal
-                    // rotated during the check.
+                    // Re-saved, not just kept: picks up any cookies Microsoft rotated
+                    // during the check.
                     await logger.step('REFRESH_SAVED_SESSION', async () => {
-                        await landingPage.saveStorageState({ path: storageStateFor(index), indexedDB: true });
+                        await microsoftLoginPage.saveStorageState({ path: storageStateFor(index), indexedDB: true });
                     });
                     return;
                 }
 
                 await logger.step('DISCARD_REJECTED_SESSION', async () => {
                     logger.info(`Saved session for account #${index + 1} was rejected — signing in again.`);
-                    await landingPage.clearCookies();
+                    await microsoftLoginPage.clearCookies();
                 });
             }
 
-            await logger.step('OPEN_LOGIN_PAGE', async () => {
-                await loginPage.navigate();
+            await logger.step('OPEN_MICROSOFT_SIGN_IN', async () => {
+                await microsoftLoginPage.open();
             });
 
             await logger.step('SIGN_IN_VIA_MICROSOFT_SSO', async () => {
-                await loginPage.login(account.username);
                 await microsoftLoginPage.login(account.username, account.password, account.otpSecret);
                 await microsoftLoginPage.expectRedirectedBackToApp();
             });
 
             await logger.step('VERIFY_SIGNED_IN', async () => {
-                await landingPage.expectLandingPageVisible();
                 // The cookie that lets Microsoft skip the password and OTP for every
                 // other app — fail here, not in some later spec, if it's missing.
                 await microsoftLoginPage.expectSessionCookiePresent();
             });
 
             await logger.step('SAVE_SESSION', async () => {
-                await landingPage.saveStorageState({ path: storageStateFor(index), indexedDB: true });
+                await microsoftLoginPage.saveStorageState({ path: storageStateFor(index), indexedDB: true });
             });
         });
     });

@@ -1,0 +1,175 @@
+name: OP Intake Pipeline (S0-S2)
+
+# Tracker status, S0 Create intake files, S1 Upload intake files, S2 Upload
+# claim memos — see README § OP Teleconsultation pipeline.
+#
+# Manual trigger only: S1 and S2 upload to the real Azure Blob storage the
+# claims pipeline watches, so nothing here runs on a push or a schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      create_intake:
+        description: 'S0 Create intake files'
+        type: boolean
+        default: true
+      upload_intake:
+        description: 'S1 Upload intake files'
+        type: boolean
+        default: true
+      upload_memos:
+        description: 'S2 Upload claim memos'
+        type: boolean
+        default: true
+      payment_mode:
+        description: 'Payment mode to generate files for (PAYMENT_MODE_FILTER)'
+        type: choice
+        default: ALL
+        options:
+          - ALL
+          - DPS
+          - COMCHECK
+          - UB
+
+# Every run reads and writes the same tracker and filename counter on the
+# runner (see "Restore pipeline state") — two at once would overwrite each other.
+concurrency:
+  group: op-pipeline-state
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    name: Tracker status, S0-S2
+    # Self-hosted Windows runner (AVD-BASCL06-0), same as playwright.yml.
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: powershell
+    env:
+      # ALL = no filter; an empty value is read as "every mode".
+      PAYMENT_MODE_FILTER: ${{ inputs.payment_mode != 'ALL' && inputs.payment_mode || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # 22.18+ at least: the scripts run .ts files with plain `node`.
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The pipeline's state is git-ignored, so checkout's clean (here and in
+      # playwright.yml) deletes it from the workspace on every run. It is kept
+      # outside the repo, under the runner user's profile, and copied in here:
+      #  - test-data/  the tracker workbook + the intake files S1/S2 read
+      #  - scripts/.intake-sequence-state.json  the filename counter; losing it
+      #    restarts today's codes at 00001 and reuses control codes already uploaded
+      # No browser install: setup/api use channel msedge, the runner's own Edge.
+      - name: Restore pipeline state
+        id: restore
+        run: |
+          $state = Join-Path $env:USERPROFILE 'claims-qa-state\op-pipeline'
+          if (Test-Path "$state\test-data") {
+            robocopy "$state\test-data" test-data /E /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Restoring test-data failed (robocopy exit $LASTEXITCODE)." }
+          }
+          if (Test-Path "$state\.intake-sequence-state.json") {
+            Copy-Item "$state\.intake-sequence-state.json" scripts\ -Force
+          }
+          Write-Host "Pipeline state restored from $state"
+          # robocopy's 1-7 mean success; don't let them become the step's exit code.
+          exit 0
+
+      - name: Tracker status (before)
+        run: |
+          $out = node scripts/init-control-code-tracker.ts
+          $code = $LASTEXITCODE
+          $out | Write-Host
+          (@('### Tracker status (before)', '```') + $out + @('```')) | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          exit $code
+
+      - name: S0 Create intake files
+        if: ${{ inputs.create_intake }}
+        run: node scripts/generate-intake-batches.ts
+
+      # headless is forced on under CI by playwright.config.ts. The `setup`
+      # project signs in to Microsoft first (password + generated TOTP).
+      - name: S1 Upload intake files
+        if: ${{ inputs.upload_intake }}
+        run: npx playwright test tests/IntakeUpload.spec.ts
+        env:
+          # Left side = env var the config reads (do not rename); right side = your GitHub secret.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          # Own folder per step, or S2's report would replace this one.
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s1-intake-upload
+
+      # Skipped if S1 failed. Only codes whose S1 passed are eligible anyway.
+      - name: S2 Upload claim memos
+        if: ${{ inputs.upload_memos }}
+        run: npx playwright test tests/ClaimMemoUpload.spec.ts
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s2-memo-upload
+
+      - name: Tracker status (after)
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        run: |
+          $out = node scripts/init-control-code-tracker.ts
+          $code = $LASTEXITCODE
+          $out | Write-Host
+          (@('### Tracker status (after)', '```') + $out + @('```')) | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          exit $code
+
+      # Saved even when a step failed: the tracker records failures too, and
+      # the next run needs them. Only after a successful restore, so a run
+      # that never loaded the state can't save an empty one over it.
+      # /E never deletes from the store; lock files are left behind.
+      - name: Save pipeline state
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        run: |
+          $state = Join-Path $env:USERPROFILE 'claims-qa-state\op-pipeline'
+          New-Item -ItemType Directory -Force -Path $state | Out-Null
+          if (Test-Path test-data) {
+            robocopy test-data "$state\test-data" /E /XF *.lock /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Saving test-data failed (robocopy exit $LASTEXITCODE)." }
+          }
+          if (Test-Path scripts\.intake-sequence-state.json) {
+            Copy-Item scripts\.intake-sequence-state.json $state -Force
+          }
+          Write-Host "Pipeline state saved to $state"
+          exit 0
+
+      # Control codes, stages and statuses only — no member names (CLAUDE.md
+      # § Control Code Tracker). The intake files themselves are NOT uploaded.
+      - name: Upload tracker
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-code-tracker
+          path: test-data/control-code-tracker.xlsx
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Same PII reasoning as playwright.yml: a failure screenshot can show an
+      # authenticated page, so keep the retention window short.
+      - name: Upload Playwright HTML report
+        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-op-intake
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 3

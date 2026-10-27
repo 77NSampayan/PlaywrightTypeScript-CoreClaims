@@ -33,7 +33,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { generateIntakeBatches, getChannelDir, matchesPaymentModeFilter } from './generate-intake-batches.ts';
 import { readFailedRows } from './generate-claim-memos.ts';
-import { readPassingRows } from './generate-payment-journal.ts';
+import { readPassingRows, type GenerateForCodesOptions } from './generate-payment-journal.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = path.join(__dirname, 'templates', 'F2307_template.pdf');
@@ -64,8 +64,8 @@ async function buildF2307(payeeName: string): Promise<Uint8Array> {
     return doc.save();
 }
 
-async function findComcheckRows(): Promise<{ controlCode: string; doctor: string }[]> {
-    const [passing, failed] = await Promise.all([readPassingRows(), readFailedRows()]);
+async function findComcheckRows(date?: Date): Promise<{ controlCode: string; doctor: string }[]> {
+    const [passing, failed] = await Promise.all([readPassingRows(date), readFailedRows(date)]);
     const comcheckRows = [...passing, ...failed].filter((row) => row.paymentMode === 'COMCHECK');
 
     // A single OPEML file can carry more than one row for the same claim
@@ -75,14 +75,27 @@ async function findComcheckRows(): Promise<{ controlCode: string; doctor: string
     return comcheckRows.filter((row) => (seen.has(row.controlCode) ? false : (seen.add(row.controlCode), true)));
 }
 
-export async function generateF2307(): Promise<void> {
+export type GeneratedF2307 = { controlCode: string; filePath: string };
+
+// `controlCodes` + `date` (both optional; the CLI passes neither) narrow it
+// to the codes the Control Code Tracker says are due, read from their own
+// channel/date folder, with no self-healing — same contract as
+// generatePaymentJournals()'s GenerateForCodesOptions.
+export async function generateF2307(options: GenerateForCodesOptions = {}): Promise<GeneratedF2307[]> {
     if (!matchesPaymentModeFilter('COMCHECK')) {
         console.log('PAYMENT_MODE_FILTER excludes ComCheck — skipping F2307 (ComCheck-only).');
-        return;
+        return [];
     }
 
-    let matches = await findComcheckRows();
-    if (matches.length === 0) {
+    let matches = await findComcheckRows(options.date);
+    if (options.controlCodes) {
+        const wanted = new Set(options.controlCodes);
+        matches = matches.filter((row) => wanted.has(row.controlCode));
+        const missing = options.controlCodes.filter((code) => !matches.some((row) => row.controlCode === code));
+        if (missing.length > 0) {
+            throw new Error(`No COMCHECK intake row found for ${missing.join(', ')} — nothing to reference.`);
+        }
+    } else if (matches.length === 0) {
         // Not "rows.length === 0" — other channels can have rows (a
         // different payment mode entirely) without having one for the
         // payment mode we actually need.
@@ -94,8 +107,9 @@ export async function generateF2307(): Promise<void> {
         throw new Error('No OPEML row found for COMCHECK — nothing to reference.');
     }
 
-    const outDir = getChannelDir('COMCHECK');
+    const outDir = getChannelDir('COMCHECK', options.date);
     await mkdir(outDir, { recursive: true });
+    const written: GeneratedF2307[] = [];
 
     for (const match of matches) {
         // Use the matched row's actual doctor, not a fixed constant — keeps
@@ -107,7 +121,9 @@ export async function generateF2307(): Promise<void> {
         const outPath = path.join(outDir, `F2307_${match.controlCode}.pdf`);
         await writeFile(outPath, bytes);
         console.log(`Wrote F2307: ${outPath}`);
+        written.push({ controlCode: match.controlCode, filePath: outPath });
     }
+    return written;
 }
 
 // Runs automatically only when invoked directly (`node scripts/generate-f2307.ts`),

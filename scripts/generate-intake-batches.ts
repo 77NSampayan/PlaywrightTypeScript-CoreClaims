@@ -43,11 +43,19 @@
 //     test-data/DPS/10.05.26/OPEML2026100500004T.xlsx        (DPS,      positive)
 //     test-data/COM CHECK/10.05.26/OPEML2026100500005T.xlsx  (ComCheck, positive)
 //     test-data/UB/10.05.26/OPEML2026100500006T.xlsx         (UB,       positive)
+//
+// Every run also updates the Control Code Tracker (test-data/control-code-
+// tracker.xlsx, stage S0): each new code goes in as IN_PROGRESS when the run
+// starts and turns PASSED as its file is written, with a console log of
+// both steps. Close the tracker in Excel first — an open file can't be saved.
 
 import ExcelJS from 'exceljs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+// Relative, not @utils: this script runs under plain `node`, which doesn't
+// resolve tsconfig path aliases (see scripts/upload-intake-files.ts).
+import { ControlCodeTracker, newRunId, summarizeError } from '../src/utils/tracker/ControlCodeTracker.util.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(__dirname);
@@ -103,6 +111,39 @@ export function getChannelDir(paymentMode: PaymentMode, date: Date = getToday())
 // control-code prefix but are always .pdf, never .xlsx).
 export function isIntakeFilename(name: string): boolean {
     return /^OPEML.*\.xlsx$/i.test(name);
+}
+
+export type IntakeRow = {
+    controlCode: string;
+    /** 1-based, excluding the header. */
+    rowNumber: number;
+    transactionId: string;
+    actionMemo: string;
+};
+
+// Every row of one intake file — same column mapping as readFailedRows()/
+// readPassingRows() (14 = Control Code, 10 = Consultation/Transaction ID,
+// 20 = Action Memo). Deliberately skips Member Code/Name: this feeds the
+// Control Code Tracker, which holds no patient identifiers.
+export async function readIntakeRows(filePath: string): Promise<IntakeRow[]> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+
+    const rows: IntakeRow[] = [];
+    sheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return; // header
+        const controlCode = String(row.getCell(14).value ?? '').trim();
+        if (!controlCode) return;
+        rows.push({
+            controlCode,
+            rowNumber: rowNumber - 1,
+            transactionId: String(row.getCell(10).value ?? '').trim(),
+            actionMemo: String(row.getCell(20).value ?? '').trim(),
+        });
+    });
+    return rows;
 }
 
 // Ad hoc "generate for one payment mode only" override, e.g.
@@ -284,66 +325,87 @@ const COLUMN_WIDTHS = [
     14.54, 9.18,
 ];
 
-function buildWorkbook(filename: string, paymentMode: PaymentMode, patients: Patient[], negative: boolean, visitDate: string, receivedDate: string): ExcelJS.Workbook {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet(filename);
+type PlannedRow = { patient: Patient; actionMemo: 'Y' | 'N'; visitTime: string; transactionId: string };
 
-    sheet.columns = HEADERS.map((header, i) => ({ header, width: COLUMN_WIDTHS[i]! }));
+// One intake file, fully decided before anything is written — so the
+// Control Code Tracker can be told every code (and its rows) up front, as
+// IN_PROGRESS, before the first file lands.
+type PlannedFile = BatchEntry & { negative: boolean; channelDir: string; rows: PlannedRow[] };
 
-    const doctor = pickDoctor(paymentMode);
-
-    patients.forEach((patient, i) => {
+function planFile(entry: BatchEntry, patients: Patient[], negative: boolean, today: Date): PlannedFile {
+    const rows = patients.map((patient, i): PlannedRow => ({
+        patient,
         // In a negative-batch file, only the 2nd row is the deliberate
         // failure (blank Diagnosis/Dx Code, Action Memo = "Y") — the 1st row
         // is complete and passing, so the file isn't "every row fails."
         // Positive batches are unaffected: every row stays complete/"N".
-        const rowFails = negative && i > 0;
-        const diagnosis = rowFails ? '' : SAMPLE_DIAGNOSIS.diagnosis;
-        const dxCode = rowFails ? '' : SAMPLE_DIAGNOSIS.dxCode;
-        const actionMemo = rowFails ? 'Y' : 'N';
+        actionMemo: negative && i > 0 ? 'Y' : 'N',
+        visitTime: VISIT_TIMES[i % VISIT_TIMES.length]!,
+        transactionId: nextTransactionId(),
+    }));
+    return { ...entry, negative, channelDir: getChannelDir(entry.paymentMode, today), rows };
+}
 
+function buildWorkbook(file: PlannedFile, visitDate: string, receivedDate: string): ExcelJS.Workbook {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(file.filename);
+
+    sheet.columns = HEADERS.map((header, i) => ({ header, width: COLUMN_WIDTHS[i]! }));
+
+    const doctor = pickDoctor(file.paymentMode);
+
+    for (const row of file.rows) {
+        const rowFails = row.actionMemo === 'Y';
         sheet.addRow([
-            patient.memberCode,
-            patient.name,
+            row.patient.memberCode,
+            row.patient.name,
             COMMON_FIELDS.company,
-            diagnosis,
-            dxCode,
+            rowFails ? '' : SAMPLE_DIAGNOSIS.diagnosis,
+            rowFails ? '' : SAMPLE_DIAGNOSIS.dxCode,
             doctor,
             COMMON_FIELDS.sourceSystem,
             visitDate,
-            VISIT_TIMES[i % VISIT_TIMES.length],
-            nextTransactionId(),
+            row.visitTime,
+            row.transactionId,
             COMMON_FIELDS.approvalNo,
             COMMON_FIELDS.otp,
             COMMON_FIELDS.pfAmount,
-            filename,
+            file.filename,
             COMMON_FIELDS.claimType,
             COMMON_FIELDS.procedure,
             receivedDate,
             COMMON_FIELDS.careSetting,
             COMMON_FIELDS.claimSubType,
-            actionMemo,
+            row.actionMemo,
         ]);
-    });
+    }
 
     return workbook;
 }
 
-async function writeBatch(batch: BatchEntry[], patients: Patient[], negative: boolean, visitDate: string, receivedDate: string, today: Date): Promise<void> {
-    for (const entry of batch) {
-        const workbook = buildWorkbook(entry.filename, entry.paymentMode, patients, negative, visitDate, receivedDate);
-        const outDir = getChannelDir(entry.paymentMode, today);
-        await mkdir(outDir, { recursive: true });
-        const outPath = path.join(outDir, `${entry.filename}.xlsx`);
-        await workbook.xlsx.writeFile(outPath);
-        console.log(`Wrote ${negative ? 'negative' : 'positive'} batch file: ${outPath}`);
-    }
+const TRACKER_ACTOR = 'generate-intake-batches.ts';
+
+export type GeneratedIntakeFile = { controlCode: string; paymentMode: PaymentMode; filePath: string; negative: boolean };
+
+const repoRelative = (p: string) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
+
+function describeFile(file: PlannedFile): string {
+    const memoRows = file.rows.filter((r) => r.actionMemo === 'Y').length;
+    return `${file.filename}  ${CHANNEL_FOLDER[file.paymentMode].padEnd(9)} ${(file.negative ? 'NEGATIVE' : 'POSITIVE').padEnd(9)} ` +
+        `${file.rows.length} row(s), ${memoRows} Action Memo`;
 }
 
 // Exported so tests/IntakeUpload.spec.ts can call it directly (generate a
 // sample batch on demand when no intake files exist for today) instead of
 // requiring a separate manual `node scripts/generate-intake-batches.ts` step.
-export async function generateIntakeBatches(): Promise<void> {
+//
+// Also stage S0 of the Control Code Tracker (test-data/control-code-
+// tracker.xlsx): every code is registered as IN_PROGRESS before the first
+// file is written, then each one is marked PASSED (or FAILED) as its file
+// lands — so the tracker shows a creation run while it's happening, not
+// only after. A tracker that can't be saved (open in Excel) stops the run
+// before any file is written.
+export async function generateIntakeBatches(): Promise<GeneratedIntakeFile[]> {
     const state = await loadState();
     const now = getToday();
     const yesterday = new Date(now);
@@ -371,13 +433,67 @@ export async function generateIntakeBatches(): Promise<void> {
     const negativePatients = pickRandomPatients(2);
     const positivePatients = pickRandomPatients(2, negativePatients);
 
-    await writeBatch(negativeBatch, negativePatients, true, visitDate, receivedDate, now);
-    await writeBatch(positiveBatch, positivePatients, false, visitDate, receivedDate, now);
+    const planned = [
+        ...negativeBatch.map((entry) => planFile(entry, negativePatients, true, now)),
+        ...positiveBatch.map((entry) => planFile(entry, positivePatients, false, now)),
+    ];
 
+    // Claim the counter before anything else: once a code is in the tracker
+    // it must never be handed out again, even if this run crashes mid-write.
     await saveState({
         date: today,
         lastCounter: counter,
     });
+
+    const tracker = new ControlCodeTracker();
+    const runId = newRunId();
+
+    console.log(`\n── Intake file creation · ${runId} ──────────────────────────`);
+    await tracker.register(
+        planned.map((file) => ({
+            controlCode: file.filename,
+            runId,
+            channelDir: file.channelDir,
+            paymentChannel: file.paymentMode,
+            claimRows: file.rows.map((row, i) => ({ rowNumber: i + 1, transactionId: row.transactionId, actionMemo: row.actionMemo })),
+        })),
+        TRACKER_ACTOR,
+        { creationStatus: 'IN_PROGRESS' }
+    );
+    console.log(`[EXECUTING] ${planned.length} control code(s) registered in the tracker as S0 IN_PROGRESS`);
+    console.log(`            ${tracker.filePath}`);
+
+    const written: GeneratedIntakeFile[] = [];
+    const failed: string[] = [];
+
+    for (const file of planned) {
+        const outPath = path.join(file.channelDir, `${file.filename}.xlsx`);
+        try {
+            await mkdir(file.channelDir, { recursive: true });
+            await buildWorkbook(file, visitDate, receivedDate).xlsx.writeFile(outPath);
+        } catch (err) {
+            // Keep going: one unwritable file shouldn't leave the rest of the
+            // batch stuck IN_PROGRESS in the tracker.
+            failed.push(file.filename);
+            await tracker.failStage(file.filename, 'S0_INTAKE_CREATION', TRACKER_ACTOR, summarizeError(err));
+            console.log(`  ✗ ${describeFile(file)}  — ${summarizeError(err)}`);
+            continue;
+        }
+
+        await tracker.passStage(file.filename, 'S0_INTAKE_CREATION', TRACKER_ACTOR, {
+            fields: { intakeFileName: `${file.filename}.xlsx` },
+            detail: repoRelative(outPath),
+        });
+        written.push({ controlCode: file.filename, paymentMode: file.paymentMode, filePath: outPath, negative: file.negative });
+        console.log(`  ✓ ${describeFile(file)}  → ${repoRelative(outPath)}`);
+    }
+
+    console.log(`[DONE] ${written.length} intake file(s) created, ${failed.length} failed — tracker S0 updated`);
+    if (failed.length > 0) {
+        throw new Error(`Intake file creation failed for ${failed.join(', ')} — see the tracker's Event Log.`);
+    }
+    console.log('       Next: npx playwright test tests/IntakeUpload.spec.ts\n');
+    return written;
 }
 
 // Runs automatically only when invoked directly (`node scripts/generate-intake-batches.ts`),

@@ -105,7 +105,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { generateIntakeBatches, getChannelDir, matchesPaymentModeFilter } from './generate-intake-batches.ts';
-import { readPassingRows } from './generate-payment-journal.ts';
+import { readPassingRows, type PassingRow } from './generate-payment-journal.ts';
 import { db_config } from '../playwright.config.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -366,27 +366,44 @@ async function resolveEpNumber(mode: 'DPS' | 'UB', controlCode: string): Promise
     return getEpNumberOverride(mode);
 }
 
-export async function generateDpsReturnFile(): Promise<void> {
+export type GeneratedReturnFile = { controlCode: string; filePath: string; epNumber: string };
+
+// Both optional; the CLI passes neither:
+//   - controlCode: the one code this run's shared Return File should carry
+//     (the Control Code Tracker picks it and marks the channel's other due
+//     codes NOT_COVERED). Without it, the first passing row is used, as before.
+//   - date: read that day's channel folder instead of today's.
+// With controlCode set there is no self-healing — a missing row throws
+// rather than generating a fresh intake batch nobody uploaded.
+export type ReturnFileOptions = { controlCode?: string; date?: Date };
+
+async function findReturnFileRow(mode: 'DPS' | 'UB', options: ReturnFileOptions): Promise<PassingRow> {
+    const matches = (row: PassingRow) => row.paymentMode === mode && (!options.controlCode || row.controlCode === options.controlCode);
+
+    let match = (await readPassingRows(options.date)).find(matches);
+    if (!match && !options.controlCode) {
+        await generateIntakeBatches();
+        match = (await readPassingRows()).find(matches);
+    }
+
+    if (!match) {
+        const which = options.controlCode ? ` with Control Code ${options.controlCode}` : '';
+        throw new Error(`No passing OPEML row found for ${mode}${which} — nothing to reference.`);
+    }
+    return match;
+}
+
+export async function generateDpsReturnFile(options: ReturnFileOptions = {}): Promise<GeneratedReturnFile | undefined> {
     if (!matchesPaymentModeFilter('DPS')) {
         console.log('PAYMENT_MODE_FILTER excludes DPS — skipping the DPS Return File.');
-        return;
+        return undefined;
     }
 
     // Return File is keyed by doctor identity (email/mobile), not by claim —
     // DPS has exactly one doctor, so only one file is needed per run, not
     // one per Control Code the way Disbursement/Payment Journal/F2307 are
     // (those represent a per-claim artifact; this doesn't).
-    let passingRows = await readPassingRows();
-    let match = passingRows.find((row) => row.paymentMode === 'DPS');
-    if (!match) {
-        await generateIntakeBatches();
-        passingRows = await readPassingRows();
-        match = passingRows.find((row) => row.paymentMode === 'DPS');
-    }
-
-    if (!match) {
-        throw new Error('No passing OPEML row found for DPS — nothing to reference.');
-    }
+    const match = await findReturnFileRow('DPS', options);
 
     const contact = DOCTOR_CONTACTS[match.doctor];
     if (!contact) {
@@ -420,7 +437,7 @@ export async function generateDpsReturnFile(): Promise<void> {
 
     const csv = `${DPS_HEADERS.join(',')}\n${row.map(csvField).join(',')}\n`;
 
-    const outDir = getChannelDir('DPS', now);
+    const outDir = getChannelDir('DPS', options.date ?? now);
     await mkdir(outDir, { recursive: true });
     const isoSlug = now.toISOString().replace(/:/g, '_');
     const outPath = path.join(outDir, `transfer_money_export_${isoSlug}.csv`);
@@ -428,6 +445,7 @@ export async function generateDpsReturnFile(): Promise<void> {
     console.log(`Wrote DPS Return File: ${outPath}`);
 
     await saveState(state);
+    return { controlCode: match.controlCode, filePath: outPath, epNumber: transferId };
 }
 
 const HEADER_LABEL_FONT = { bold: true, size: 11, name: 'Calibri', family: 2 as const };
@@ -446,26 +464,16 @@ function setHeaderField(sheet: ExcelJS.Worksheet, row: number, label: string, va
     valueCell.font = HEADER_VALUE_FONT;
 }
 
-export async function generateUbReturnFile(): Promise<void> {
+export async function generateUbReturnFile(options: ReturnFileOptions = {}): Promise<GeneratedReturnFile | undefined> {
     if (!matchesPaymentModeFilter('UB')) {
         console.log('PAYMENT_MODE_FILTER excludes UB — skipping the UB Return File.');
-        return;
+        return undefined;
     }
 
     // Return File is keyed by doctor identity, not by claim — UB has exactly
     // one doctor, so only one file is needed per run, not one per Control
     // Code (see generateDpsReturnFile()'s own note on why).
-    let passingRows = await readPassingRows();
-    let match = passingRows.find((row) => row.paymentMode === 'UB');
-    if (!match) {
-        await generateIntakeBatches();
-        passingRows = await readPassingRows();
-        match = passingRows.find((row) => row.paymentMode === 'UB');
-    }
-
-    if (!match) {
-        throw new Error('No passing OPEML row found for UB — nothing to reference.');
-    }
+    const match = await findReturnFileRow('UB', options);
 
     const state = await loadState();
     const now = getToday();
@@ -549,13 +557,14 @@ export async function generateUbReturnFile(): Promise<void> {
         cell.font = DETAIL_VALUE_FONT;
     });
 
-    const outDir = getChannelDir('UB', now);
+    const outDir = getChannelDir('UB', options.date ?? now);
     await mkdir(outDir, { recursive: true });
     const outPath = path.join(outDir, `${baseName}.xlsx`);
     await workbook.xlsx.writeFile(outPath);
     console.log(`Wrote UB Return File: ${outPath}`);
 
     await saveState(state);
+    return { controlCode: match.controlCode, filePath: outPath, epNumber };
 }
 
 export async function generateReturnFiles(): Promise<void> {
