@@ -120,7 +120,7 @@ Set-File (Join-Path $sb.Workspace $tracker) 'tracker-v1'
 Set-File (Join-Path $sb.Workspace $intake) 'intake-v1'
 $r = Invoke-State $sb 'save'
 Check 'tracker only: save succeeds' ($r.Code -eq 0) $r.Output
-$files = Get-StoreFiles $sb
+$files = @(Get-StoreFiles $sb)  # @(): a one-item result would unwrap to a plain string
 Check 'tracker only: files lists the tracker alone' ($files.Count -eq 1 -and $files[0] -eq 'test-data/control-code-tracker.xlsx') ($files -join ', ')
 Remove-Item (Join-Path $sb.Workspace 'test-data') -Recurse -Force
 $r = Invoke-State $sb 'restore' 'false' '2'

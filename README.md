@@ -203,6 +203,48 @@ How it behaves:
   confirm by hand`) and leaves the code `WAITING`; it never times the code out
   for that.
 
+### Pipeline state on the runner
+
+GitHub Actions keeps one tracker for every control code CI generates. The
+[OP intake workflow](.github/workflows/op-intake-pipeline.yml) runs only on the
+self-hosted runner labelled `op-pipeline` (AVD-BASCL06-0). Its
+[pipeline-state action](.github/actions/pipeline-state/) copies the git-ignored state
+in before the stages run and back out afterwards, even when a stage failed:
+
+| Kept | Where on the runner (`%USERPROFILE%\claims-qa-state\`) |
+|---|---|
+| Tracker + intake files (`test-data/`) | `op-pipeline\test-data\` |
+| Filename counter (`scripts/.intake-sequence-state.json`) | `op-pipeline\.intake-sequence-state.json` |
+| What the last run saved, and which run | `op-pipeline\store.json` |
+| Tracker + counter before each run, newest 20 | `op-pipeline-snapshots\<timestamp>-run<N>\` |
+
+Local runs are not part of this: your machine keeps its own tracker. To see CI's, open a
+run's summary (tracker status before and after) or download its `control-code-tracker`
+artifact, kept 30 days.
+
+**First run on a runner.** A run stops with "No pipeline state found" until the state
+exists, because starting empty would restart the filename counter and reuse control
+codes already uploaded. Run the workflow once with **initialize_state** ticked and
+S0–S2 unticked. To carry existing codes over, first copy a local `test-data\` and
+`scripts\.intake-sequence-state.json` into `op-pipeline\` on the runner.
+
+**"Pipeline state is damaged".** A file the last run saved is gone. Restore it:
+
+1. Make sure no pipeline workflow is running.
+2. On the runner, copy `control-code-tracker.xlsx` from the newest good folder under
+   `op-pipeline-snapshots\` into `op-pipeline\test-data\`, and
+   `.intake-sequence-state.json` into `op-pipeline\`.
+3. Run the workflow with S0–S2 unticked and check "Tracker status (before)".
+
+The same steps roll back a run that wrote a bad tracker: use the snapshot taken before
+that run.
+
+To test the action without a runner:
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/actions/pipeline-state/pipeline-state.tests.ps1
+```
+
 ## Writing test specs
 
 Specs are plain Playwright Test scripts — `test.describe` / `test` / `test.beforeEach` — not Cucumber/Gherkin `.feature` files. There's no separate BDD framework here, but the tests are still capable of reading like BDD scenarios: `logger.step(...)` gives each Given/When/Then-style beat of the flow a named block, both in the console and as a collapsible node in the HTML report/trace viewer.

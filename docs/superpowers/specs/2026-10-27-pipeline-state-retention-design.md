@@ -48,7 +48,7 @@ copy off the machine.
     .intake-sequence-state.json       filename counter
     store.json                        marker (below)
   op-pipeline-snapshots\
-    20261027-143005-run42\            tracker + counter as they were BEFORE run 42
+    20261027-143005-123-run42\        tracker + counter as they were BEFORE run 42
     …                                 newest 20 kept
 ```
 
@@ -97,7 +97,8 @@ Inputs:
    op-pipeline-snapshots\ (README § Pipeline state on the runner)."
 3. `initialize` true while `store.json` exists → warning, ignored.
 4. Snapshot: copy the tracker and counter (those present) to
-   `op-pipeline-snapshots\<yyyyMMdd-HHmmss>-run<N>\`; delete all but the newest
+   `op-pipeline-snapshots\<yyyyMMdd-HHmmss-fff>-run<N>\` (milliseconds, so names
+   never collide and sort by age); delete all but the newest
    `snapshot-keep`.
 5. Copy `op-pipeline\test-data\` → workspace `test-data\` (robocopy `/E`), and the counter
    → `scripts\`.
