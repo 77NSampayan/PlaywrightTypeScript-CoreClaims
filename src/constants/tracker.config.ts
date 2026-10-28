@@ -145,6 +145,22 @@ export function isWaitStage(stage: Stage): stage is WaitStage {
  */
 export const STALE_IN_PROGRESS_MINUTES = 15;
 
+export type SkippedStages = Partial<Record<Stage, string>>;
+
+/**
+ * Stages skipped for now, each with the reason recorded on the code. A
+ * skipped stage is set to N/A as soon as a code reaches it, so later stages
+ * aren't held up by it. Delete an entry to bring the stage back: new codes go
+ * through it again, and codes already skipped keep their N/A — truthfully,
+ * since the stage was never verified for them.
+ */
+export const SKIPPED_STAGES: SkippedStages = {
+    // No access to the data_enrichment database yet. While S3 is skipped,
+    // ClaimsQueryCheck.spec.ts (S4) skips its DB row counts too and only
+    // checks that each code shows up in Claims Query.
+    S3_INTAKE_PROCESSED: 'S3 skipped: no DE database access yet — confirm by hand',
+};
+
 // Expected email subject prefix per channel, copied from the swimlane.
 export const EMAIL_SUBJECT_PREFIX: Record<PaymentChannel, string> = {
     UB: 'MPI Claims ePayout - UBT',
@@ -294,7 +310,7 @@ export const STATUS_MEANINGS: Record<StageStatus, string> = {
     PASSED: 'Done. The next stage can run.',
     FAILED: 'Upload or check error. Re-running the spec retries it.',
     TIMED_OUT: 'No signal by the deadline. Manual investigation — never retried, re-uploaded or extended automatically.',
-    'N/A': 'Does not apply to this code (e.g. memos when no row has Action Memo = Y).',
+    'N/A': 'Does not apply to this code (e.g. memos when no row has Action Memo = Y), or the stage is skipped for now — see Remarks.',
     BLOCKED: 'An earlier stage timed out.',
     NOT_COVERED: "The channel's shared Return File carries a different control code — this code ends here.",
 };

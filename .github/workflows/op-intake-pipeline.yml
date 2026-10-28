@@ -1,7 +1,10 @@
-name: OP Intake Pipeline (S0-S2)
+name: OP Intake Pipeline (S0-S4)
 
 # Tracker status, S0 Create intake files, S1 Upload intake files, S2 Upload
-# claim memos — see README § OP Teleconsultation pipeline.
+# claim memos, S4 Check claims in Core Claims — see README § OP
+# Teleconsultation pipeline. S3 is skipped for now (no DE database access;
+# SKIPPED_STAGES in src/constants/tracker.config.ts). Run S4 as its own run,
+# 15+ min after S2: DE needs that long to process the intake.
 #
 # Manual trigger only: S1 and S2 upload to the real Azure Blob storage the
 # claims pipeline watches, so nothing here runs on a push or a schedule.
@@ -20,6 +23,10 @@ on:
         description: 'S2 Upload claim memos'
         type: boolean
         default: true
+      check_core_claims:
+        description: 'S4 Check claims in Core Claims (run alone, 15+ min after S2)'
+        type: boolean
+        default: false
       payment_mode:
         description: 'Payment mode to generate files for (PAYMENT_MODE_FILTER)'
         type: choice
@@ -34,8 +41,8 @@ on:
         type: boolean
         default: false
 
-# Every pipeline run reads and writes the same tracker and filename counter on
-# the runner (README § Pipeline state on the runner) — two at once would
+# Every pipeline run reads and writes the same tracker and used control numbers
+# on the runner (README § Pipeline state on the runner) — two at once would
 # overwrite each other. Future S3+ workflows join this same group.
 concurrency:
   group: op-pipeline-state
@@ -43,7 +50,7 @@ concurrency:
 
 jobs:
   pipeline:
-    name: Tracker status, S0-S2
+    name: Tracker status, S0-S4
     # AVD-BASCL06-0 only: it holds the pipeline state. Any other runner would
     # start empty and reuse control codes, so the op-pipeline label pins it.
     runs-on: [self-hosted, windows, op-pipeline]
@@ -69,7 +76,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The pipeline's state (tracker, intake files, filename counter) is
+      # The pipeline's state (tracker, intake files, used control numbers) is
       # git-ignored, so checkout's clean deletes it from the workspace on every
       # run; this keeps it on the runner between runs. Refuses to run when the
       # state is missing or damaged — README § Pipeline state on the runner.
@@ -120,6 +127,20 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s2-memo-upload
 
+      # Searches each due code in Core Claims → Claims Query (msedge project,
+      # signs in through `setup` first). Presence only while S3 is skipped.
+      # Too early (DE still processing) = FAILED, which a later run retries.
+      - name: S4 Check claims in Core Claims
+        if: ${{ inputs.check_core_claims }}
+        run: npx playwright test tests/ClaimsQueryCheck.spec.ts
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s4-claims-query
+
       - name: Tracker status (after)
         if: ${{ always() && steps.restore.outcome == 'success' }}
         run: |
@@ -152,7 +173,7 @@ jobs:
       # Same PII reasoning as playwright.yml: a failure screenshot can show an
       # authenticated page, so keep the retention window short.
       - name: Upload Playwright HTML report
-        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos) }}
+        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos || inputs.check_core_claims) }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-op-intake

@@ -1,7 +1,7 @@
 name: Pipeline state
 description: >-
   Restores or saves the OP pipeline's git-ignored state (tracker, intake
-  files, filename counter) on the self-hosted runner between runs.
+  files, used control numbers) on the self-hosted runner between runs.
   See README § Pipeline state on the runner.
 
 inputs:

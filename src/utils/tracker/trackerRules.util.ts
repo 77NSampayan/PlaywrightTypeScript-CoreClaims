@@ -91,7 +91,7 @@ export function getChannel(row: TrackerRow): PaymentChannel | undefined {
     return raw === 'DPS' || raw === 'UB' || raw === 'COMCHECK' ? raw : undefined;
 }
 
-const isDone = (status: StageStatus | 'INVALID') => status === 'PASSED' || status === 'N/A';
+export const isDone = (status: StageStatus | 'INVALID') => status === 'PASSED' || status === 'N/A';
 
 // ─── Wait windows ──────────────────────────────
 

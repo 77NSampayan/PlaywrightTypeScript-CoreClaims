@@ -149,8 +149,8 @@ use, and `test-data/` is gitignored.
 | S0 Intake file creation | `node scripts/generate-intake-batches.ts` (or IntakeUpload's own fallback) | — the generator registers each code as `IN_PROGRESS`, then `PASSED` once its file is written |
 | S1 Intake upload | `tests/IntakeUpload.spec.ts` (`api`) | S0 passed, not yet uploaded |
 | S2 Memo upload | `tests/ClaimMemoUpload.spec.ts` (`api`) | S1 passed and a row has Action Memo = Y (otherwise N/A) |
-| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2 |
-| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed |
+| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2. **Skipped for now** (no DE database access): set to N/A as each code reaches it — see below |
+| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed or skipped. While S3 is skipped, presence only (no DB row counts) — run it 15+ min after S2 |
 | S5 Payment Journal / Disbursement | `tests/PaymentJournalUpload.spec.ts` (`api`) | S4 passed |
 | S6 Payment processed · S7 EP No / NAV pay ref | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
 | S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed |
@@ -162,7 +162,7 @@ Creating intake files prints what happened to the tracker as it goes:
 ```text
 ── Intake file creation · RUN-20261026-1630 ──────────────────────────
 [EXECUTING] 6 control code(s) registered in the tracker as S0 IN_PROGRESS
-  ✓ OPEML2026102600001T  DPS       NEGATIVE  2 row(s), 1 Action Memo  → test-data/DPS/10.26.26/OPEML2026102600001T.xlsx
+  ✓ OPEML2026102648213T  DPS       NEGATIVE  2 row(s), 1 Action Memo  → test-data/DPS/10.26.26/OPEML2026102648213T.xlsx
   ...
 [DONE] 6 intake file(s) created, 0 failed — tracker S0 updated
 ```
@@ -172,6 +172,14 @@ node scripts/generate-intake-batches.ts            # create intake files (S0) �
 node scripts/init-control-code-tracker.ts          # one line per code: stage, status, what to run next
 npx playwright test --project=db tests/PipelineSignalCheck.spec.ts   # advance every due DE wait
 ```
+
+**Skipping a stage.** `SKIPPED_STAGES` in
+[src/constants/tracker.config.ts](src/constants/tracker.config.ts) lists stages that are
+skipped for now, with a reason. A code reaching one gets `N/A` there, with the reason in
+Remarks and the Event Log, so the next stage can run. S3 is listed until the DE database
+access arrives; S4 then checks only that each code shows up in Claims Query. To bring S3
+back, delete its entry: new codes wait at S3 again, and codes already skipped keep their
+`N/A`.
 
 How it behaves:
 
@@ -214,7 +222,7 @@ in before the stages run and back out afterwards, even when a stage failed:
 | Kept | Where on the runner (`%USERPROFILE%\claims-qa-state\`) |
 |---|---|
 | Tracker + intake files (`test-data/`) | `op-pipeline\test-data\` |
-| Filename counter (`scripts/.intake-sequence-state.json`) | `op-pipeline\.intake-sequence-state.json` |
+| Control numbers used today (`scripts/.intake-sequence-state.json`) | `op-pipeline\.intake-sequence-state.json` |
 | What the last run saved, and which run | `op-pipeline\store.json` |
 | Tracker + counter before each run, newest 20 | `op-pipeline-snapshots\<timestamp>-run<N>\` |
 
@@ -223,8 +231,8 @@ run's summary (tracker status before and after) or download its `control-code-tr
 artifact, kept 30 days.
 
 **First run on a runner.** A run stops with "No pipeline state found" until the state
-exists, because starting empty would restart the filename counter and reuse control
-codes already uploaded. Run the workflow once with **initialize_state** ticked and
+exists, because starting empty would lose the tracker's history and the record of
+control numbers already used. Run the workflow once with **initialize_state** ticked and
 S0–S2 unticked. To carry existing codes over, first copy a local `test-data\` and
 `scripts\.intake-sequence-state.json` into `op-pipeline\` on the runner.
 
