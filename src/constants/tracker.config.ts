@@ -156,7 +156,7 @@ export const DEFAULT_WAIT_WINDOWS: Record<WaitStage, WaitWindow> = {
     // 14:00:07 and 17:00:10 for uploads a few minutes earlier), so the
     // check follows the clock: 2 min after each run, 4 runs before timing out.
     S3_INTAKE_PROCESSED: { minWaitMinutes: 2, jobEveryMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job at :00/:15/:30/:45)' },
-    S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal · COMCHECK: de_nav_pay_ref (stand-in, real signal TBC)' },
+    S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal by [Reference Control No.] · COMCHECK: de_nav_pay_ref (stand-in, real signal TBC)' },
     S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input · COMCHECK: de_nav_pay_ref' },
     S9_TRANSMITTAL_F2307: { minWaitMinutes: 30, capMinutes: 60, signal: 'de_transmittal_details + de_f2307_pdf_generation (job every 30 min)' },
     S10_EMAIL: { minWaitMinutes: 30, capMinutes: 60, signal: 'Email in the channel mailbox (job every 30 min)' },
