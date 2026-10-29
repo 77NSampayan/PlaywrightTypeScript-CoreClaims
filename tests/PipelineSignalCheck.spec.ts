@@ -28,11 +28,9 @@ async function checkSignal(signals: DeSignalReader, dbConnection: DbConnection, 
             return { result, fields: { deStatus: result.value ?? 'present', deClaimLines: counts.total, billedLines: counts.withBillCode } };
         }
         case 'S6_PAYMENT_PROCESSED':
-            // COMCHECK's own "Disbursement processed" signal is still [TBC] —
-            // the NAV pay ref row stands in for it, since it can't exist
-            // before the Disbursement File was processed.
+            // COMCHECK: DE loads the Disbursement File into de_nav_pay_ref.
             return channel === 'COMCHECK'
-                ? { result: await signals.navPayRef(controlCode), fields: { paymentSignalSource: 'de_nav_pay_ref (stand-in)' } }
+                ? { result: await signals.navPayRef(controlCode), fields: { paymentSignalSource: 'de_nav_pay_ref' } }
                 : { result: await signals.paymentJournalProcessed(controlCode), fields: { paymentSignalSource: 'de_payment_journal' } };
         case 'S7_PAYMENT_REFERENCE': {
             const result = channel === 'COMCHECK' ? await signals.navPayRef(controlCode) : await signals.epNumber(channel, controlCode);
