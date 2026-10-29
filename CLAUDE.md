@@ -42,7 +42,7 @@ Config is loaded from `.env` at the repo root via `dotenv` in [playwright.config
 - `BASE_URL`, `VALID_USERNAME_1`, `VALID_PASSWORD_1` — always required; `requireEnv()` throws at config-load time (before any test runs) if any is missing
 - `VALID_OTP_SECRET_1` — only required by the SSO login spec's MFA step; checked lazily (a getter), the first time something actually reads it — see the comment in `accountFromEnv()` in [playwright.config.ts](playwright.config.ts)
 - `VALID_USERNAME_n` / `VALID_PASSWORD_n` / `VALID_OTP_SECRET_n` for n = 2, 3, … — optional extra test accounts, read until the first missing `VALID_USERNAME_n`. Each one adds a parallel worker (`workers` = number of accounts).
-- `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT`, `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` — only required by DB-backed specs (`dbConnection`/`membershipDbConnection`); same lazy-getter treatment, built via the shared `dbConfigFromEnv(prefix)` helper
+- `DB_SERVER` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_PORT` (the `data_enrichment` database), `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` — only required by DB-backed specs (`dbConnection`/`membershipDbConnection`); same lazy-getter treatment, built via the shared `dbConfigFromEnv(prefix)` helper
 - `LOG_LEVEL` — optional, controls `SmartLogger` verbosity (`DEBUG` | `INFO` | `STEP` | `WARN` | `ERROR`, defaults to `INFO`)
 
 Full table with notes: [README.md](README.md) § Setup.

@@ -9,8 +9,8 @@
 // tsconfig paths). So this script uses `mssql` directly.
 //
 // Credentials come from .env only (see README § Setup):
-//     data-enrichment → DATA_ENRICHMENT_DB_SERVER / _NAME / _USER / _PASSWORD / _PORT
-//     membership      → MEMBERSHIP_DB_SERVER     / _NAME / _USER / _PASSWORD / _PORT
+//     data-enrichment → DB_SERVER            / _NAME / _USER / _PASSWORD / _PORT
+//     membership      → MEMBERSHIP_DB_SERVER / _NAME / _USER / _PASSWORD / _PORT
 // _PORT is optional (defaults to 1433). Nothing here prints a credential.
 //
 // Results may contain member data — print to your own terminal only; don't
@@ -44,7 +44,7 @@ const REPO_ROOT = path.dirname(__dirname);
 dotenv.config({ path: path.join(REPO_ROOT, '.env'), quiet: true });
 
 const DB_PREFIXES: Record<string, string> = {
-    'data-enrichment': 'DATA_ENRICHMENT_DB',
+    'data-enrichment': 'DB',
     'membership': 'MEMBERSHIP_DB',
 };
 

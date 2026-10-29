@@ -145,11 +145,11 @@ jobs:
           BASE_URL: ${{ secrets.BASE_URL }}
           VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
           VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
-          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
-          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
-          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
-          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
-          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s3-intake-processed
 
@@ -164,11 +164,11 @@ jobs:
           VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
           VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
           VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
-          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
-          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
-          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
-          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
-          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s4-claims-query
 

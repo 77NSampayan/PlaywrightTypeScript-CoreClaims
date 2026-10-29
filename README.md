@@ -38,7 +38,7 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    | `VALID_PASSWORD_1` | always | Password for that account |
    | `VALID_OTP_SECRET_1` | only for the SSO login spec's MFA step | TOTP seed for the account's authenticator |
    | `VALID_USERNAME_n` / `VALID_PASSWORD_n` / `VALID_OTP_SECRET_n` (n = 2, 3, …) | no | Extra test accounts, read until the first missing `VALID_USERNAME_n`. Each account is bound to one parallel worker, so the run uses as many workers as accounts. |
-   | `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
+   | `DB_SERVER` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
    | `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `membershipDbConnection`-backed specs | Separate server/credentials from the DB above. Same read-only-account guidance applies. |
    | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
 
