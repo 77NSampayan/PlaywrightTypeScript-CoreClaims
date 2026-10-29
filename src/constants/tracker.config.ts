@@ -47,6 +47,22 @@ export const STAGES = [
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
+/**
+ * Earlier stages a stage does NOT wait for. S4 is a UI check (does Claims
+ * Query show the code?) and S3 a DB check (did DE process it?) — two
+ * independent confirmations, so S4 only needs the uploads (S1, S2) done, and
+ * an S3 timeout doesn't block it. Stages after S4 still need both.
+ */
+export const NOT_PREREQUISITES: Partial<Record<Stage, readonly Stage[]>> = {
+    S4_CORECLAIMS_VISIBLE: ['S3_INTAKE_PROCESSED'],
+};
+
+/** The earlier stages that must be PASSED or N/A before `stage` may run. */
+export function prerequisitesOf(stage: Stage): Stage[] {
+    const independent = NOT_PREREQUISITES[stage] ?? [];
+    return STAGES.slice(0, STAGES.indexOf(stage)).filter((earlier) => !independent.includes(earlier));
+}
+
 export const STAGE_STATUSES = [
     'NOT_STARTED',
     'IN_PROGRESS',  // a spec has started it (an upload in flight)

@@ -28,7 +28,7 @@ on:
         type: boolean
         default: false
       check_core_claims:
-        description: 'S4 Check claims in Core Claims (needs S3 passed)'
+        description: 'S4 Check claims in Core Claims (uploaded codes not confirmed yet)'
         type: boolean
         default: false
       payment_mode:
@@ -155,9 +155,11 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s3-intake-processed
 
-      # Searches each code whose S3 passed in Core Claims → Claims Query
-      # (msedge project, signs in through `setup` first), and compares the row
-      # count with DE's billed claim lines. Skipped if S3 failed in this run.
+      # Searches every uploaded code (S1 passed, S2 passed or N/A) whose S4
+      # isn't confirmed yet in Core Claims → Claims Query (msedge project, signs
+      # in through `setup` first), and compares the row count with DE's billed
+      # claim lines. Doesn't need S3, but this step is skipped if S3 failed in
+      # this run; run S4 on its own then.
       - name: S4 Check claims in Core Claims
         if: ${{ inputs.check_core_claims }}
         run: npx playwright test tests/ClaimsQueryCheck.spec.ts

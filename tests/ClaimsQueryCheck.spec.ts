@@ -41,8 +41,10 @@ type CheckFixtures = {
 /**
  * Stage S4 of the Control Code Tracker — the "is it in Core Claims yet?"
  * check that used to be done by hand. Without CONTROL_CODE, it checks every
- * code whose intake processing (S3) has passed or is skipped, and records the
- * result; re-running skips codes already PASSED. `deCounts` reads DE's
+ * code in the tracker whose uploads are done (S1 PASSED, S2 PASSED or N/A)
+ * and whose S4 isn't confirmed yet — it does not wait for S3, the separate
+ * DB check. Codes with S4 PASSED are skipped; a code not shown yet is
+ * recorded FAILED and checked again on the next run. `deCounts` reads DE's
  * expected row counts; without it, only presence is checked.
  */
 async function checkClaimsQuery(
@@ -57,7 +59,7 @@ async function checkClaimsQuery(
     }
 
     const controlCodes = spotCheck ?? (await tracker.getEligible('S4_CORECLAIMS_VISIBLE')).map((code) => code.controlCode);
-    test.skip(controlCodes.length === 0, 'No control code is due for the Claims Query check (needs S3 PASSED or skipped in the tracker).');
+    test.skip(controlCodes.length === 0, 'No control code is due for the Claims Query check (needs S1 PASSED, S2 PASSED or N/A, and S4 not PASSED yet).');
 
     // Already signed in to Microsoft: the `setup` project (tests/auth.setup.ts)
     // saved the session this test starts from, so no password or OTP here.
@@ -116,9 +118,9 @@ async function checkClaimsQuery(
             await claimsQueryPage.expectControlCodeNotFound(controlCode);
             return { fields: { expectedRefCount: 0, foundRefCount: 0 }, detail: `${total} DE claim line(s), none billed — correctly absent` };
         }
-        // Not in DE's table at all — still within the ~15 min processing
-        // window, or a real/historical code checked by hand. Fall back to
-        // a plain presence check.
+        // Not in DE's table at all — DE hasn't processed it yet (S4 doesn't
+        // wait for S3), or a real/historical code checked by hand. Fall back
+        // to a plain presence check; not shown yet = FAILED, retried next run.
         await claimsQueryPage.expectControlCodeFound(controlCode);
         return { detail: 'not in de_op_tc_claim_details — presence check only' };
     };

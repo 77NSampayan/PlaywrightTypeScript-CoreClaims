@@ -34,6 +34,7 @@ import {
     STAGES,
     STAGE_COLUMNS,
     isWaitStage,
+    prerequisitesOf,
     trackerPath,
     type PaymentChannel,
     type SkippedStages,
@@ -362,9 +363,11 @@ export class ControlCodeTracker {
             });
 
             const later = STAGES.slice(STAGES.indexOf(stage) + 1);
+            // Only stages that wait on the timed-out one are blocked: S4
+            // doesn't wait on S3 (NOT_PREREQUISITES), so it still runs.
             if (to === 'TIMED_OUT') {
                 for (const next of later) {
-                    if (getStatus(row, next) !== 'N/A') row[STAGE_COLUMNS[next].status] = 'BLOCKED';
+                    if (getStatus(row, next) !== 'N/A' && prerequisitesOf(next).includes(stage)) row[STAGE_COLUMNS[next].status] = 'BLOCKED';
                 }
             }
 

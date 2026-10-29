@@ -124,7 +124,10 @@ test.describe('Control Code Tracker — gating rules', () => {
         await tracker.timeoutStage(POSITIVE_CODE, 'S3_INTAKE_PROCESSED', 'test', 'no signal');
 
         const row = await tracker.getRow(POSITIVE_CODE);
-        await assert.toEqual([row?.s3Status, row?.s4Status, row?.s10Status, row?.overallStatus], ['TIMED_OUT', 'BLOCKED', 'BLOCKED', 'MANUAL_INVESTIGATION'], 'timed-out code statuses');
+        // S4 doesn't wait on S3 (a separate UI check), so it isn't blocked —
+        // its status stays blank (not started).
+        await assert.toEqual([row?.s3Status, row?.s4Status, row?.s5Status, row?.s10Status, row?.overallStatus], ['TIMED_OUT', undefined, 'BLOCKED', 'BLOCKED', 'MANUAL_INVESTIGATION'], 'timed-out code statuses');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE, NEGATIVE_CODE], 'S4-eligible codes, whatever their S3 status');
         await assert.toEqual(await eligibleCodes(tracker, 'S3_INTAKE_PROCESSED'), [NEGATIVE_CODE], 'S3-eligible codes after the other one timed out');
 
         const { events } = await tracker.read();
@@ -270,6 +273,21 @@ test.describe('Control Code Tracker — gating rules', () => {
         await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s3Status, 'N/A', 'S3 status after applying the skip');
         await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE], 'S4-eligible codes after applying the skip');
         await assert.toEqual(await tracker.applySkippedStages('test'), [], 'codes skipped by a second call');
+    });
+
+    test('Offers S4 once the uploads are done, without waiting for S3, until S4 passes', async ({ assert }, testInfo) => {
+        const { tracker } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(NEGATIVE_CODE, ['N', 'Y'])], 'test');
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 N/A → S3 WAITING
+        await tracker.passStage(NEGATIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 still to upload
+
+        await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s3Status, 'WAITING', 'S3 status while S4 is checked');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE], 'S4-eligible codes (the other still needs its memos)');
+
+        await tracker.passStage(NEGATIVE_CODE, 'S2_MEMO_UPLOAD', 'test');
+        await tracker.runStage(POSITIVE_CODE, 'S4_CORECLAIMS_VISIBLE', 'test', async () => ({}));
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [NEGATIVE_CODE], 'S4-eligible codes once one is confirmed');
+        await assert.toEqual(await eligibleCodes(tracker, 'S5_PAYMENT_UPLOAD'), [], 'S5 still waits for S3');
     });
 
     test('Checks S3 after DE\'s next quarter-hour run, and times out after its 4th', async ({ assert }, testInfo) => {

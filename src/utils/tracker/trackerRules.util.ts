@@ -14,6 +14,7 @@ import {
     STAGE_STATUSES,
     STALE_IN_PROGRESS_MINUTES,
     isWaitStage,
+    prerequisitesOf,
     writerFor,
     type OverallStatus,
     type PaymentChannel,
@@ -178,7 +179,7 @@ export type Evaluation =
 
 export function evaluateStage(row: TrackerRow, stage: Stage, config: WaitConfig, now: Date): Evaluation {
     const index = STAGES.indexOf(stage);
-    for (const earlier of STAGES.slice(0, index)) {
+    for (const earlier of prerequisitesOf(stage)) {
         const earlierStatus = getStatus(row, earlier);
         if (!isDone(earlierStatus)) {
             return { state: 'INELIGIBLE', reason: `waiting on ${earlier} (${earlierStatus})` };
