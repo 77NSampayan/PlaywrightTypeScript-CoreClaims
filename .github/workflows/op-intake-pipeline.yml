@@ -2,8 +2,8 @@ name: OP Intake Pipeline (S0-S4)
 
 # Tracker status, S0 Create intake files, S1 Upload intake files, S2 Upload
 # claim memos, S3 Check intake processed, S4 Check claims in Core Claims —
-# see README § OP Teleconsultation pipeline. Run S3 (+ S4) as their own run,
-# 15+ min after S2: DE needs that long to process the intake. A code S3
+# see README § OP Teleconsultation pipeline. S3 can run straight after S2:
+# it waits for DE's quarter-hour runs itself (up to ~1 hour). A code S3
 # confirms in a run is checked by S4 in that same run.
 #
 # Manual trigger only: S1 and S2 upload to the real Azure Blob storage the
@@ -24,7 +24,7 @@ on:
         type: boolean
         default: true
       check_intake_processed:
-        description: 'S3 Check intake processed in the DE database (15+ min after S2)'
+        description: 'S3 Check intake processed in the DE database (waits for DE, up to ~1 hour)'
         type: boolean
         default: false
       check_core_claims:
@@ -58,7 +58,8 @@ jobs:
     # AVD-BASCL06-0 only: it holds the pipeline state. Any other runner would
     # start empty and reuse control codes, so the op-pipeline label pins it.
     runs-on: [self-hosted, windows, op-pipeline]
-    timeout-minutes: 45
+    # S3 alone can wait ~1 hour for DE's runs, on top of S0-S2 and S4.
+    timeout-minutes: 120
     defaults:
       run:
         shell: powershell
@@ -132,10 +133,11 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s2-memo-upload
 
       # Read-only DE lookups (db project, no browser) for every code whose wait
-      # is due — S3 now, and S6/S7/S9 once codes get there. Single pass: a code
-      # not due yet is left alone, a miss before its deadline stays WAITING, a
-      # miss after it is TIMED_OUT and fails this step. The DB connection opens
-      # before any code is checked, so an unreachable database fails the step
+      # is waiting — S3 now, and S6/S7/S9 once codes get there. Waits for each
+      # code's first check, re-checks after every DE run (S3: 2 min after
+      # :00/:15/:30/:45), and ends when every code passed or reached its
+      # deadline; a miss at the deadline is TIMED_OUT and fails this step. The
+      # DB connection opens before any code is checked, so an unreachable database fails the step
       # without writing anything to the tracker.
       - name: S3 Check intake processed
         if: ${{ inputs.check_intake_processed }}

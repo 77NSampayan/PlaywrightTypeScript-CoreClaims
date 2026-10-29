@@ -89,7 +89,7 @@ export type EligibleCode = {
 
 export type StageQuery = {
     eligible: EligibleCode[];
-    notDue: { controlCode: string; nextCheckAt: Date }[];
+    notDue: { controlCode: string; nextCheckAt: Date; deadline: Date }[];
 };
 
 export type StageUpdate = {
@@ -170,7 +170,7 @@ export class ControlCodeTracker {
 
             const evaluation = evaluateStage(row, stage, config, now);
             if (evaluation.state === 'NOT_DUE') {
-                result.notDue.push({ controlCode: String(row.controlCode), nextCheckAt: evaluation.window.nextCheckAt });
+                result.notDue.push({ controlCode: String(row.controlCode), nextCheckAt: evaluation.window.nextCheckAt, deadline: evaluation.window.deadline });
             } else if (evaluation.state === 'ELIGIBLE') {
                 result.eligible.push({
                     controlCode: String(row.controlCode),

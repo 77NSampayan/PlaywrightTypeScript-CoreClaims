@@ -163,6 +163,11 @@ function readConfigSheet(sheet: ExcelJS.Worksheet | undefined): WaitConfig {
     const config = defaultConfig();
     if (!sheet) return config;
 
+    // A sheet written before the DE Job Every column existed: its Min Wait
+    // was "after the window start", which means something else for a stage
+    // that now follows DE's clock — keep the new defaults for those stages.
+    const hasJobColumn = headerIndex(sheet, 1).has('DE Job Every (min)');
+
     for (const record of readSimpleSheet(sheet, CONFIG_HEADERS)) {
         const stage = asText(record['Stage']) as WaitStage;
         if (!(stage in config)) continue;
@@ -170,8 +175,11 @@ function readConfigSheet(sheet: ExcelJS.Worksheet | undefined): WaitConfig {
         // a 0-minute window, which would time every code out on first check.
         const minWait = asNumber(record['Min Wait (min)']);
         const cap = asNumber(record['Cap (min)']);
-        if (minWait !== undefined && minWait >= 0) config[stage].minWaitMinutes = minWait;
+        const jobEvery = asNumber(record['DE Job Every (min)']);
+        const oldLayoutScheduled = !hasJobColumn && config[stage].jobEveryMinutes !== undefined;
+        if (minWait !== undefined && minWait >= 0 && !oldLayoutScheduled) config[stage].minWaitMinutes = minWait;
         if (cap !== undefined && cap > 0) config[stage].capMinutes = cap;
+        if (jobEvery !== undefined && jobEvery > 0) config[stage].jobEveryMinutes = jobEvery;
         const signal = asText(record['Signal']);
         if (signal) config[stage].signal = signal;
     }
@@ -393,13 +401,14 @@ export function buildTrackerWorkbook(data: TrackerData): ExcelJS.Workbook {
     buildSimpleSheet(workbook, SHEET.events, EVENT_LOG_HEADERS, [20, 18, 22, 24, 13, 13, 30, 9, 80],
         data.events.map((e) => [formatTimestamp(e.timestamp), e.runId, e.controlCode, e.stage, e.from, e.to, e.actor, e.elapsedMinutes ?? null, e.detail]));
 
-    const configSheet = buildSimpleSheet(workbook, SHEET.config, CONFIG_HEADERS, [24, 15, 11, 80],
+    const configSheet = buildSimpleSheet(workbook, SHEET.config, CONFIG_HEADERS, [24, 15, 11, 19, 80],
         (Object.keys(data.config) as WaitStage[]).map((stage) => {
             const window = data.config[stage];
-            return [stage, window.minWaitMinutes, window.capMinutes, window.signal];
+            return [stage, window.minWaitMinutes, window.capMinutes, window.jobEveryMinutes ?? null, window.signal];
         }));
     configSheet.addRow([]);
-    configSheet.addRow(['Edit Min Wait / Cap here. "Next Check At" = window start + Min Wait; "Wait Deadline" = window start + Cap.']);
+    configSheet.addRow(['Edit Min Wait / Cap / DE Job Every here. Without DE Job Every: "Next Check At" = window start + Min Wait; "Wait Deadline" = window start + Cap.']);
+    configSheet.addRow(['With DE Job Every (DE runs on the clock, e.g. 15 = :00/:15/:30/:45): each check is Min Wait after a DE run, and a code gets Cap ÷ DE Job Every runs before it times out.']);
 
     buildLegendSheet(workbook);
     return workbook;

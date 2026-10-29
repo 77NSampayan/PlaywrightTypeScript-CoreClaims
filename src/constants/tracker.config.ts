@@ -115,8 +115,17 @@ export function writerFor(stage: Stage, channel: PaymentChannel | undefined): st
 export type WaitStage = 'S3_INTAKE_PROCESSED' | 'S6_PAYMENT_PROCESSED' | 'S7_PAYMENT_REFERENCE' | 'S9_TRANSMITTAL_F2307' | 'S10_EMAIL';
 
 export type WaitWindow = {
-    /** Window start + this = "Next Check At": a check before it is a no-op. */
+    /**
+     * Window start + this = "Next Check At": a check before it is a no-op.
+     * For a stage with `jobEveryMinutes`: minutes after each DE run instead.
+     */
     minWaitMinutes: number;
+    /**
+     * DE's job interval for this stage, on the clock (15 = :00/:15/:30/:45).
+     * Set: checks follow DE's runs, and Cap ÷ this = how many runs a code
+     * gets before it times out. Unset: plain window start + Min Wait / Cap.
+     */
+    jobEveryMinutes?: number;
     /** Window start + this = "Wait Deadline": still no signal after it → TIMED_OUT. */
     capMinutes: number;
     signal: string;
@@ -127,7 +136,10 @@ export type WaitWindow = {
 // window for an existing tracker. Caps are still [TBC] in the swimlane; a
 // 15-minute cap would miss most 30-minute DE jobs.
 export const DEFAULT_WAIT_WINDOWS: Record<WaitStage, WaitWindow> = {
-    S3_INTAKE_PROCESSED: { minWaitMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job every 15 min)' },
+    // DE's intake job runs at :00/:15/:30/:45 and takes seconds (DONE at
+    // 14:00:07 and 17:00:10 for uploads a few minutes earlier), so the
+    // check follows the clock: 2 min after each run, 4 runs before timing out.
+    S3_INTAKE_PROCESSED: { minWaitMinutes: 2, jobEveryMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job at :00/:15/:30/:45)' },
     S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal · COMCHECK: de_nav_pay_ref (stand-in, real signal TBC)' },
     S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input · COMCHECK: de_nav_pay_ref' },
     S9_TRANSMITTAL_F2307: { minWaitMinutes: 30, capMinutes: 60, signal: 'de_transmittal_details + de_f2307_pdf_generation (job every 30 min)' },
@@ -287,7 +299,7 @@ export const CLAIM_ROW_HEADERS = ['Control Code', 'Row #', 'Consultation/Transac
 
 export const EVENT_LOG_HEADERS = ['Timestamp', 'Run ID', 'Control Code', 'Stage', 'From', 'To', 'Actor', 'Elapsed (min)', 'Detail'] as const;
 
-export const CONFIG_HEADERS = ['Stage', 'Min Wait (min)', 'Cap (min)', 'Signal'] as const;
+export const CONFIG_HEADERS = ['Stage', 'Min Wait (min)', 'Cap (min)', 'DE Job Every (min)', 'Signal'] as const;
 
 // Upload destination per stage/channel — documentation only (Legend sheet);
 // the specs that upload keep their own folder constants.

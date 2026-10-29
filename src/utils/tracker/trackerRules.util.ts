@@ -95,12 +95,37 @@ export const isDone = (status: StageStatus | 'INVALID') => status === 'PASSED' |
 
 // ─── Wait windows ──────────────────────────────
 
-export type WaitWindowTimes = { start: Date; nextCheckAt: Date; deadline: Date };
+export type WaitWindowTimes = {
+    start: Date;
+    /** First check worth making. */
+    nextCheckAt: Date;
+    deadline: Date;
+    /** Set when DE runs on the clock — see WaitWindow.jobEveryMinutes. */
+    jobEveryMinutes?: number;
+    /** Minutes after a DE run before checking (clock-aligned stages only). */
+    afterRunMinutes: number;
+};
+
+/**
+ * First DE run strictly after `after`, for a job every `everyMinutes` on the
+ * clock (15 → :00/:15/:30/:45). An upload at exactly 17:00:00 may have just
+ * missed the 17:00 run, so the next one counts.
+ */
+export function nextJobRun(after: Date, everyMinutes: number): Date {
+    const run = new Date(after);
+    run.setSeconds(0, 0);
+    run.setMinutes(Math.floor(run.getMinutes() / everyMinutes) * everyMinutes + everyMinutes);
+    return run;
+}
 
 /**
  * A wait's window opens when the stage before it finished — the upload, or
  * the previous signal (swimlane "Waiting rules"). N/A stages are skipped, so
  * for an all-"N" code S3's window opens at S1, not at the memo upload.
+ *
+ * A clock-aligned stage (jobEveryMinutes) is checked Min Wait after DE's next
+ * run, and gets Cap ÷ jobEveryMinutes runs: upload 16:59:31 → runs 17:00,
+ * 17:15, 17:30, 17:45 → first check 17:02, deadline 17:47.
  */
 export function waitWindow(row: TrackerRow, stage: WaitStage, config: WaitConfig): WaitWindowTimes | undefined {
     const index = STAGES.indexOf(stage);
@@ -110,10 +135,38 @@ export function waitWindow(row: TrackerRow, stage: WaitStage, config: WaitConfig
 
         const start = getAt(row, previous);
         if (!start) return undefined;
-        const { minWaitMinutes, capMinutes } = config[stage];
-        return { start, nextCheckAt: addMinutes(start, minWaitMinutes), deadline: addMinutes(start, capMinutes) };
+        const { minWaitMinutes, capMinutes, jobEveryMinutes } = config[stage];
+        if (!jobEveryMinutes) {
+            return { start, nextCheckAt: addMinutes(start, minWaitMinutes), deadline: addMinutes(start, capMinutes), afterRunMinutes: 0 };
+        }
+        const firstRun = nextJobRun(start, jobEveryMinutes);
+        const runs = Math.max(1, Math.floor(capMinutes / jobEveryMinutes));
+        return {
+            start,
+            nextCheckAt: addMinutes(firstRun, minWaitMinutes),
+            deadline: addMinutes(firstRun, (runs - 1) * jobEveryMinutes + minWaitMinutes),
+            jobEveryMinutes,
+            afterRunMinutes: minWaitMinutes,
+        };
     }
     return undefined;
+}
+
+/** How long a stage without DE's run times waits between re-checks. */
+export const RECHECK_MINUTES = 5;
+
+/**
+ * When to check again after a check at `now` found nothing: Min Wait after
+ * DE's next run for a clock-aligned stage (a check before it can't find
+ * anything new), else RECHECK_MINUTES later. Never before the first check,
+ * never after the deadline — the check at the deadline is the last one.
+ */
+export function nextCheckAfter(window: WaitWindowTimes, now: Date): Date {
+    const next = window.jobEveryMinutes
+        ? addMinutes(nextJobRun(addMinutes(now, -window.afterRunMinutes), window.jobEveryMinutes), window.afterRunMinutes)
+        : addMinutes(now, RECHECK_MINUTES);
+    const time = Math.min(Math.max(next.getTime(), window.nextCheckAt.getTime()), window.deadline.getTime());
+    return new Date(time);
 }
 
 // ─── Eligibility ──────────────────────────────
@@ -230,14 +283,22 @@ export function deriveControl(row: TrackerRow, config: WaitConfig, now: Date): C
     const window = waitWindow(row, current, config);
     if (!window) return { ...base, ...blank, nextStep: `Run ${writer}` };
 
-    const timing = now < window.nextCheckAt
-        ? `after ${formatClock(window.nextCheckAt)}`
-        : `now (deadline ${formatClock(window.deadline)})`;
+    // A clock-aligned stage already past its first check: point at the check
+    // after DE's next run, since a check before it can't find anything new.
+    const nextCheck = now >= window.nextCheckAt && window.jobEveryMinutes ? nextCheckAfter(window, now) : window.nextCheckAt;
+    let timing: string;
+    if (now < window.nextCheckAt) {
+        timing = `after ${formatClock(window.nextCheckAt)}`;
+    } else if (window.jobEveryMinutes && nextCheck < window.deadline) {
+        timing = `now, or after ${formatClock(nextCheck)} for DE's next run (deadline ${formatClock(window.deadline)})`;
+    } else {
+        timing = `now (deadline ${formatClock(window.deadline)})`;
+    }
     return {
         ...base,
         nextStep: `Run ${writer} ${timing}`,
         waitWindowStart: formatTimestamp(window.start),
-        nextCheckAt: formatTimestamp(window.nextCheckAt),
+        nextCheckAt: formatTimestamp(nextCheck),
         waitDeadline: formatTimestamp(window.deadline),
     };
 }

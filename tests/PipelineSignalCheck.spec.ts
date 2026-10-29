@@ -1,7 +1,7 @@
 import { test } from '@fixtures/base.fixture.ts';
 import type { DbConnection } from '@utils/db.util.ts';
 import { DeSignalReader, fetchClaimDetailCounts, type SignalResult } from '@utils/deSignals.util.ts';
-import { formatClock, formatTimestamp } from '@utils/tracker/trackerRules.util.ts';
+import { formatClock, formatTimestamp, nextCheckAfter } from '@utils/tracker/trackerRules.util.ts';
 import type { EligibleCode, StageUpdate } from '@utils/tracker/ControlCodeTracker.util.ts';
 import type { WaitStage } from '@constants/tracker.config.ts';
 
@@ -64,12 +64,19 @@ function timeoutEvidence(code: EligibleCode, result: SignalResult): string {
     return `file=${String(file)}; window opened=${opened}; deadline=${deadline}; last state=${result.detail}`;
 }
 
+// A plain wait, not BasePage.waitForTimeout(): there is no page here, and
+// nothing on the DB side signals "DE has run" — only the clock does.
+const sleepUntil = (at: Date) => new Promise((resolve) => setTimeout(resolve, Math.max(0, at.getTime() - Date.now())));
+
+const key = (stage: CheckedStage, controlCode: string) => `${stage} ${controlCode}`;
+
 test.describe('Control Code Tracker — DE signal checks', () => {
     // Read-only against the data_enrichment DB; writes only the tracker.
-    // Single pass, not a polling loop: every code whose wait is due right now
-    // is checked once, then the test ends. Re-run it after the "Next Check
-    // At" the tracker shows — codes not due yet are left untouched, so
-    // running it early is harmless.
+    // Run it right after an upload: it waits for each code's first check,
+    // re-checks after every DE run (S3: 2 min after :00/:15/:30/:45; other
+    // stages every 5 min) and ends once every code has passed or reached
+    // its deadline — about an hour at most. SIGNAL_CHECK_ONCE=1 makes one
+    // pass instead (codes not due yet are left alone).
     //
     // A miss before the deadline leaves the code WAITING (logged as
     // evidence); a miss after it is TIMED_OUT, which stops that code only —
@@ -77,52 +84,104 @@ test.describe('Control Code Tracker — DE signal checks', () => {
     // and fails this test so the timeout is visible in the report.
     test('Advances every control code whose DE wait is due', async ({ dbConnection, tracker, assert, logger }) => {
         const signals = new DeSignalReader(dbConnection);
+        const once = !!process.env.SIGNAL_CHECK_ONCE;
+        const startedAt = Date.now();
         const timedOut: string[] = [];
         const unresolved: string[] = [];
+        // Lookup gaps aren't waited on: re-checking can't fix a config gap.
+        const unresolvedKeys = new Set<string>();
+        // When each code that missed is worth checking again (DE's next run).
+        const recheckAt = new Map<string, Date>();
+        let timeoutMs = 0;
         let checked = 0;
 
-        for (const stage of STAGES_CHECKED) {
-            const { eligible, notDue } = await tracker.query(stage);
-            for (const pending of notDue) {
-                logger.info(`${pending.controlCode} ${stage}: not due until ${formatClock(pending.nextCheckAt)}`);
+        for (;;) {
+            await checkDueCodes();
+            if (once) break;
+
+            const now = new Date();
+            const pending: { label: string; at: Date; deadline: Date }[] = [];
+            for (const stage of STAGES_CHECKED) {
+                const { eligible, notDue } = await tracker.query(stage);
+                for (const code of notDue) {
+                    pending.push({ label: key(stage, code.controlCode), at: code.nextCheckAt, deadline: code.deadline });
+                }
+                for (const code of eligible) {
+                    const window = code.window;
+                    if (!window || now >= window.deadline || unresolvedKeys.has(key(stage, code.controlCode))) continue;
+                    pending.push({ label: key(stage, code.controlCode), at: recheckAt.get(key(stage, code.controlCode)) ?? now, deadline: window.deadline });
+                }
             }
+            if (pending.length === 0) break;
 
-            for (const code of eligible) {
-                checked++;
-                await logger.step(`CHECK_${stage}_${code.controlCode}`, async () => {
-                    const { result, fields } = await checkSignal(signals, dbConnection, stage, code);
-                    const update: StageUpdate = { detail: result.detail, ...(fields ? { fields } : {}) };
+            const wakeAt = new Date(Math.min(...pending.map((p) => p.at.getTime())));
+            const lastDeadline = Math.max(...pending.map((p) => p.deadline.getTime()));
+            // Long enough for the latest deadline's check, plus margin.
+            const needed = lastDeadline - startedAt + 10 * 60_000;
+            if (needed > timeoutMs) {
+                timeoutMs = needed;
+                test.setTimeout(timeoutMs);
+            }
+            if (wakeAt > now) {
+                logger.info(`Waiting until ${formatClock(wakeAt)} — ${pending.length} code wait(s) pending: ${pending.map((p) => p.label).join(', ')}`);
+                await sleepUntil(wakeAt);
+            }
+        }
 
-                    if (result.state === 'FOUND') {
-                        await tracker.passStage(code.controlCode, stage, ACTOR, update);
-                        if (stage === 'S6_PAYMENT_PROCESSED' && code.channel === 'COMCHECK') {
-                            // Same de_nav_pay_ref row is S7's signal too —
-                            // no point waiting another window to read it again.
-                            await tracker.passStage(code.controlCode, 'S7_PAYMENT_REFERENCE', ACTOR, {
-                                fields: { paymentReference: result.value ?? 'present' },
-                                detail: 'same de_nav_pay_ref row as S6',
+        async function checkDueCodes(): Promise<void> {
+            for (const stage of STAGES_CHECKED) {
+                const { eligible, notDue } = await tracker.query(stage);
+                for (const pending of notDue) {
+                    logger.info(`${pending.controlCode} ${stage}: not due until ${formatClock(pending.nextCheckAt)}`);
+                }
+
+                for (const code of eligible) {
+                    const dueAt = recheckAt.get(key(stage, code.controlCode));
+                    if (unresolvedKeys.has(key(stage, code.controlCode)) || (dueAt && dueAt > new Date())) continue;
+                    checked++;
+                    await logger.step(`CHECK_${stage}_${code.controlCode}`, async () => {
+                        const { result, fields } = await checkSignal(signals, dbConnection, stage, code);
+                        const update: StageUpdate = { detail: result.detail, ...(fields ? { fields } : {}) };
+
+                        if (result.state === 'FOUND') {
+                            await tracker.passStage(code.controlCode, stage, ACTOR, update);
+                            if (stage === 'S6_PAYMENT_PROCESSED' && code.channel === 'COMCHECK') {
+                                // Same de_nav_pay_ref row is S7's signal too —
+                                // no point waiting another window to read it again.
+                                await tracker.passStage(code.controlCode, 'S7_PAYMENT_REFERENCE', ACTOR, {
+                                    fields: { paymentReference: result.value ?? 'present' },
+                                    detail: 'same de_nav_pay_ref row as S6',
+                                });
+                            }
+                        } else if (result.state === 'UNRESOLVED') {
+                            // A lookup gap, not a DE miss — never times the code out.
+                            unresolvedKeys.add(key(stage, code.controlCode));
+                            unresolved.push(`${code.controlCode} ${stage}: ${result.detail}`);
+                            await tracker.note(code.controlCode, `${stage}: signal lookup unresolved (${result.detail}) — confirm by hand`, ACTOR);
+                            logger.warn(`${code.controlCode} ${stage}: signal lookup unresolved — ${result.detail}`);
+                        } else if (code.overdue) {
+                            timedOut.push(`${code.controlCode} ${stage}`);
+                            await tracker.timeoutStage(code.controlCode, stage, ACTOR, `${stage}: no DE signal by the deadline`, {
+                                ...update,
+                                detail: timeoutEvidence(code, result),
                             });
+                        } else {
+                            await tracker.stillWaiting(code.controlCode, stage, ACTOR, update);
+                            if (code.window) {
+                                const next = nextCheckAfter(code.window, new Date());
+                                recheckAt.set(key(stage, code.controlCode), next);
+                                logger.info(`${code.controlCode} ${stage}: not there yet (${result.detail}) — next check ${formatClock(next)}`);
+                            }
                         }
-                    } else if (result.state === 'UNRESOLVED') {
-                        // A lookup gap, not a DE miss — never times the code out.
-                        unresolved.push(`${code.controlCode} ${stage}: ${result.detail}`);
-                        await tracker.note(code.controlCode, `${stage}: signal lookup unresolved (${result.detail}) — confirm by hand`, ACTOR);
-                        logger.warn(`${code.controlCode} ${stage}: signal lookup unresolved — ${result.detail}`);
-                    } else if (code.overdue) {
-                        timedOut.push(`${code.controlCode} ${stage}`);
-                        await tracker.timeoutStage(code.controlCode, stage, ACTOR, `${stage}: no DE signal by the deadline`, {
-                            ...update,
-                            detail: timeoutEvidence(code, result),
-                        });
-                    } else {
-                        await tracker.stillWaiting(code.controlCode, stage, ACTOR, update);
-                    }
-                });
+                    });
+                }
             }
         }
 
         for (const description of unresolved) test.info().annotations.push({ type: 'warning', description });
-        test.skip(checked === 0, 'No control code has a DE wait due right now — see "Next Check At" in the tracker.');
+        test.skip(checked === 0, once
+            ? 'No control code has a DE wait due right now — see "Next Check At" in the tracker.'
+            : 'No control code is waiting on a DE signal.');
 
         await assert.toEqual(timedOut, [], 'control codes whose DE wait timed out (evidence in the tracker Event Log)');
     });
