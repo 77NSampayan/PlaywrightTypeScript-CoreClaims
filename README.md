@@ -149,8 +149,8 @@ use, and `test-data/` is gitignored.
 | S0 Intake file creation | `node scripts/generate-intake-batches.ts` (or IntakeUpload's own fallback) | — the generator registers each code as `IN_PROGRESS`, then `PASSED` once its file is written |
 | S1 Intake upload | `tests/IntakeUpload.spec.ts` (`api`) | S0 passed, not yet uploaded |
 | S2 Memo upload | `tests/ClaimMemoUpload.spec.ts` (`api`) | S1 passed and a row has Action Memo = Y (otherwise N/A) |
-| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2. **Skipped for now** (no DE database access): set to N/A as each code reaches it — see below |
-| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed or skipped. While S3 is skipped, presence only (no DB row counts) — run it 15+ min after S2 |
+| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2 (`de_op_file_tracker` lists `<code>.xlsx` as `DONE`; DE's job runs every 15 min) |
+| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed (or skipped, for codes from before S3 was tracked: presence only, no DB row counts) |
 | S5 Payment Journal / Disbursement | `tests/PaymentJournalUpload.spec.ts` (`api`) | S4 passed |
 | S6 Payment processed · S7 EP No / NAV pay ref | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
 | S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed |
@@ -176,10 +176,10 @@ npx playwright test --project=db tests/PipelineSignalCheck.spec.ts   # advance e
 **Skipping a stage.** `SKIPPED_STAGES` in
 [src/constants/tracker.config.ts](src/constants/tracker.config.ts) lists stages that are
 skipped for now, with a reason. A code reaching one gets `N/A` there, with the reason in
-Remarks and the Event Log, so the next stage can run. S3 is listed until the DE database
-access arrives; S4 then checks only that each code shows up in Claims Query. To bring S3
-back, delete its entry: new codes wait at S3 again, and codes already skipped keep their
-`N/A`.
+Remarks and the Event Log, so the next stage can run. It is empty today. S3 was listed
+until the DE database access arrived; codes that reached S3 during that time keep their
+`N/A` (S3 was never verified for them), and every newer code waits at S3. While S3 is
+listed, S4 also checks only that each code shows up in Claims Query.
 
 How it behaves:
 

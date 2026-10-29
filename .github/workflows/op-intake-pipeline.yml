@@ -1,10 +1,10 @@
 name: OP Intake Pipeline (S0-S4)
 
 # Tracker status, S0 Create intake files, S1 Upload intake files, S2 Upload
-# claim memos, S4 Check claims in Core Claims — see README § OP
-# Teleconsultation pipeline. S3 is skipped for now (no DE database access;
-# SKIPPED_STAGES in src/constants/tracker.config.ts). Run S4 as its own run,
-# 15+ min after S2: DE needs that long to process the intake.
+# claim memos, S3 Check intake processed, S4 Check claims in Core Claims —
+# see README § OP Teleconsultation pipeline. Run S3 (+ S4) as their own run,
+# 15+ min after S2: DE needs that long to process the intake. A code S3
+# confirms in a run is checked by S4 in that same run.
 #
 # Manual trigger only: S1 and S2 upload to the real Azure Blob storage the
 # claims pipeline watches, so nothing here runs on a push or a schedule.
@@ -23,8 +23,12 @@ on:
         description: 'S2 Upload claim memos'
         type: boolean
         default: true
+      check_intake_processed:
+        description: 'S3 Check intake processed in the DE database (15+ min after S2)'
+        type: boolean
+        default: false
       check_core_claims:
-        description: 'S4 Check claims in Core Claims (run alone, 15+ min after S2)'
+        description: 'S4 Check claims in Core Claims (needs S3 passed)'
         type: boolean
         default: false
       payment_mode:
@@ -127,9 +131,31 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s2-memo-upload
 
-      # Searches each due code in Core Claims → Claims Query (msedge project,
-      # signs in through `setup` first). Presence only while S3 is skipped.
-      # Too early (DE still processing) = FAILED, which a later run retries.
+      # Read-only DE lookups (db project, no browser) for every code whose wait
+      # is due — S3 now, and S6/S7/S9 once codes get there. Single pass: a code
+      # not due yet is left alone, a miss before its deadline stays WAITING, a
+      # miss after it is TIMED_OUT and fails this step. The DB connection opens
+      # before any code is checked, so an unreachable database fails the step
+      # without writing anything to the tracker.
+      - name: S3 Check intake processed
+        if: ${{ inputs.check_intake_processed }}
+        run: npx playwright test tests/PipelineSignalCheck.spec.ts
+        env:
+          # The config needs these three at load time, even for the db project.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s3-intake-processed
+
+      # Searches each code whose S3 passed in Core Claims → Claims Query
+      # (msedge project, signs in through `setup` first), and compares the row
+      # count with DE's billed claim lines. Skipped if S3 failed in this run.
       - name: S4 Check claims in Core Claims
         if: ${{ inputs.check_core_claims }}
         run: npx playwright test tests/ClaimsQueryCheck.spec.ts
@@ -138,6 +164,11 @@ jobs:
           VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
           VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
           VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
+          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s4-claims-query
 
@@ -173,7 +204,7 @@ jobs:
       # Same PII reasoning as playwright.yml: a failure screenshot can show an
       # authenticated page, so keep the retention window short.
       - name: Upload Playwright HTML report
-        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos || inputs.check_core_claims) }}
+        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos || inputs.check_intake_processed || inputs.check_core_claims) }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-op-intake

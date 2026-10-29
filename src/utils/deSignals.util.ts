@@ -140,9 +140,32 @@ export class DeSignalReader {
 
     // ─── Stage signals ──────────────────────────────
 
-    /** S3 — intake processed: the code has a de_claims_status_details row. Value = its status column, if any. */
+    /**
+     * S3 — intake processed: DE's file tracker lists the intake file as DONE.
+     * Columns confirmed against dbo.de_op_file_tracker (file_name =
+     * "<control code>.xlsx", status DONE once the 15-minute job has run), so
+     * no column discovery here. Any other status keeps the code waiting, with
+     * the status in the evidence. The newest row wins if the file was
+     * uploaded more than once. The time is converted to text in SQL: mssql
+     * would read a datetime as UTC and shift it 8 hours.
+     */
     async intakeProcessed(controlCode: string): Promise<SignalResult> {
-        return this.byControlCode('de_claims_status_details', controlCode, [/^status$/i, /status/i]);
+        assertSafeControlCode(controlCode);
+        const fileName = `${controlCode}.xlsx`;
+
+        const rows = await this.dbConnection.query<{ status: string | null; updated_at: string | null }>(
+            `SELECT TOP 1 [status], CONVERT(varchar(19), [updated_date], 120) AS updated_at
+             FROM [dbo].[de_op_file_tracker]
+             WHERE [file_name] = '${fileName}'
+             ORDER BY [id] DESC`,
+            `de_op_file_tracker row for "${fileName}"`
+        );
+        const row = rows[0];
+        if (!row) return { state: 'NOT_FOUND', detail: `no de_op_file_tracker row for ${fileName}` };
+
+        const status = String(row.status ?? '').trim();
+        const detail = `de_op_file_tracker: ${fileName} status ${status || '(blank)'}${row.updated_at ? ` at ${row.updated_at}` : ''}`;
+        return status.toUpperCase() === 'DONE' ? { state: 'FOUND', value: status, detail } : { state: 'NOT_FOUND', detail };
     }
 
     /** S6 (DPS/UB) — Payment Journal processed: the code has a de_payment_journal row. */

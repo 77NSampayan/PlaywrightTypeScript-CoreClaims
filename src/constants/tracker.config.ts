@@ -127,7 +127,7 @@ export type WaitWindow = {
 // window for an existing tracker. Caps are still [TBC] in the swimlane; a
 // 15-minute cap would miss most 30-minute DE jobs.
 export const DEFAULT_WAIT_WINDOWS: Record<WaitStage, WaitWindow> = {
-    S3_INTAKE_PROCESSED: { minWaitMinutes: 15, capMinutes: 60, signal: 'de_claims_status_details by control_code (job every 15 min)' },
+    S3_INTAKE_PROCESSED: { minWaitMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job every 15 min)' },
     S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal · COMCHECK: de_nav_pay_ref (stand-in, real signal TBC)' },
     S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input · COMCHECK: de_nav_pay_ref' },
     S9_TRANSMITTAL_F2307: { minWaitMinutes: 30, capMinutes: 60, signal: 'de_transmittal_details + de_f2307_pdf_generation (job every 30 min)' },
@@ -155,10 +155,9 @@ export type SkippedStages = Partial<Record<Stage, string>>;
  * since the stage was never verified for them.
  */
 export const SKIPPED_STAGES: SkippedStages = {
-    // No access to the data_enrichment database yet. While S3 is skipped,
-    // ClaimsQueryCheck.spec.ts (S4) skips its DB row counts too and only
-    // checks that each code shows up in Claims Query.
-    S3_INTAKE_PROCESSED: 'S3 skipped: no DE database access yet — confirm by hand',
+    // Nothing skipped. S3 was listed here until the data_enrichment database
+    // access arrived; while it is, ClaimsQueryCheck.spec.ts (S4) also skips
+    // its DB row counts and only checks that each code shows up.
 };
 
 // Expected email subject prefix per channel, copied from the swimlane.
