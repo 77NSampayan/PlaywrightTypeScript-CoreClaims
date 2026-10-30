@@ -152,8 +152,8 @@ use, and `test-data/` is gitignored.
 | S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | Checked 2 min after DE's next run following S1/S2 (DE runs at :00/:15/:30/:45), then after each run; `TIMED_OUT` after the 4th. Signal: `de_op_file_tracker` lists `<code>.xlsx` as `DONE` |
 | S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S1 passed and S2 passed or N/A, S4 not passed yet — independent of S3 (S4 checks the UI, S3 the DB), so an S3 timeout doesn't block it. Not shown yet = `FAILED`, retried next run |
 | S5 Payment Journal / Disbursement | `tests/PaymentJournalUpload.spec.ts` (`api`) | S4 passed |
-| S6 Payment processed · S7 EP No / NAV pay ref | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
-| S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed |
+| S6 Payment processed (DPS/UB: `de_payment_journal`; COMCHECK: `de_nav_pay_ref` by `FileName`) · S7 EP No (DPS/UB only, N/A for COMCHECK) | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
+| S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed (DPS/UB) / S6 passed (COMCHECK) |
 | S9 Transmittal + F2307 | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after S8 |
 | S10 Email | **by hand for now**: set `S10 Status` to `PASSED` | S9 passed |
 

@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import path from 'path';
 import {
+    CHANNEL_SKIPPED_STAGES,
     EMAIL_SUBJECT_PREFIX,
     REPO_ROOT,
     SKIPPED_STAGES,
@@ -379,7 +380,7 @@ export class ControlCodeTracker {
                 for (const next of later) {
                     const nextStatus = getStatus(row, next);
                     if (nextStatus === 'N/A') continue;
-                    if (nextStatus === 'NOT_STARTED' && this.skippedStages[next]) {
+                    if (nextStatus === 'NOT_STARTED' && this.skipReason(row, next)) {
                         this.skipStage(data, row, next, actor, now);
                         continue;
                     }
@@ -396,10 +397,16 @@ export class ControlCodeTracker {
         });
     }
 
+    /** Why this code skips `stage` — skipped for every code, or not part of its channel's flow — if it does. */
+    private skipReason(row: TrackerRow, stage: Stage): string | undefined {
+        const channel = getChannel(row);
+        return this.skippedStages[stage] ?? (channel ? CHANNEL_SKIPPED_STAGES[channel][stage] : undefined);
+    }
+
     /** Skipped stages this code has reached (every earlier stage done) but not yet marked N/A. */
     private reachedSkippedStages(row: TrackerRow): Stage[] {
         return STAGES.filter((stage, index) => {
-            if (!this.skippedStages[stage]) return false;
+            if (!this.skipReason(row, stage)) return false;
             const status = getStatus(row, stage);
             if (status !== 'NOT_STARTED' && status !== 'WAITING') return false;
             return STAGES.slice(0, index).every((earlier) => isDone(getStatus(row, earlier)));
@@ -408,7 +415,7 @@ export class ControlCodeTracker {
 
     /** N/A with the reason as the remark and in the Event Log — the stage was not verified. */
     private skipStage(data: TrackerData, row: TrackerRow, stage: Stage, actor: string, now: Date): void {
-        const reason = this.skippedStages[stage] ?? 'skipped';
+        const reason = this.skipReason(row, stage) ?? 'skipped';
         const from = getStatus(row, stage);
         row[STAGE_COLUMNS[stage].status] = 'N/A';
         row.remarks = reason;

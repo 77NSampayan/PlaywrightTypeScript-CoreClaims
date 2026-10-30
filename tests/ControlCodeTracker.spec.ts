@@ -261,6 +261,20 @@ test.describe('Control Code Tracker — gating rules', () => {
         await assert.toEqual([skip?.from, skip?.to, skip?.detail], ['NOT_STARTED', 'N/A', reason], 'Event Log entry for the skip');
     });
 
+    test('Skips S7 for COMCHECK only, so its F2307 upload follows S6', async ({ assert }, testInfo) => {
+        const comcheckCode = 'OPEML2026102600007T';
+        const { tracker } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(comcheckCode, ['N'], COMCHECK_DIR, 'COMCHECK')], 'test');
+        for (const stage of ['S1_INTAKE_UPLOAD', 'S3_INTAKE_PROCESSED', 'S4_CORECLAIMS_VISIBLE', 'S5_PAYMENT_UPLOAD', 'S6_PAYMENT_PROCESSED'] as const) {
+            for (const code of [POSITIVE_CODE, comcheckCode]) await tracker.passStage(code, stage, 'test');
+        }
+
+        const comcheck = await tracker.getRow(comcheckCode);
+        await assert.toEqual([comcheck?.s7Status, comcheck?.currentStage], ['N/A', 'S8_SETTLEMENT_UPLOAD'], 'COMCHECK S7 status and current stage once S6 passed');
+        await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s7Status, 'WAITING', 'DPS S7 status once S6 passed');
+        await assert.toEqual(await eligibleCodes(tracker, 'S8_SETTLEMENT_UPLOAD'), [comcheckCode], 'S8-eligible codes');
+    });
+
     test('Skips a listed stage a code had already reached before it was listed', async ({ assert }, testInfo) => {
         const filePath = testInfo.outputPath('tracker.xlsx');
         const before = trackerAt(filePath).tracker;

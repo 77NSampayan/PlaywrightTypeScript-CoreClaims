@@ -157,7 +157,7 @@ export const DEFAULT_WAIT_WINDOWS: Record<WaitStage, WaitWindow> = {
     // check follows the clock: 2 min after each run, 4 runs before timing out.
     S3_INTAKE_PROCESSED: { minWaitMinutes: 2, jobEveryMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job at :00/:15/:30/:45)' },
     S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal by [Reference Control No.] · COMCHECK: de_nav_pay_ref by [FileName] = the uploaded Disbursement File' },
-    S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input · COMCHECK: check_no in de_nav_pay_ref (same row as S6)' },
+    S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input (TBC) · COMCHECK: N/A' },
     S9_TRANSMITTAL_F2307: { minWaitMinutes: 30, capMinutes: 60, signal: 'de_transmittal_details + de_f2307_pdf_generation (job every 30 min)' },
     S10_EMAIL: { minWaitMinutes: 30, capMinutes: 60, signal: 'Email in the channel mailbox (job every 30 min)' },
 };
@@ -186,6 +186,18 @@ export const SKIPPED_STAGES: SkippedStages = {
     // Nothing skipped. S3 was listed here until the data_enrichment database
     // access arrived; while it is, ClaimsQueryCheck.spec.ts (S4) also skips
     // its DB row counts and only checks that each code shows up.
+};
+
+/**
+ * Stages a payment channel doesn't go through, each with the reason recorded
+ * on the code. Set to N/A as soon as a code of that channel reaches the
+ * stage, the same way as SKIPPED_STAGES. COMCHECK has no payment reference to
+ * wait for: its F2307 upload (S8) follows straight after S6.
+ */
+export const CHANNEL_SKIPPED_STAGES: Record<PaymentChannel, SkippedStages> = {
+    DPS: {},
+    UB: {},
+    COMCHECK: { S7_PAYMENT_REFERENCE: 'Not part of the COMCHECK flow: F2307 is uploaded straight after S6' },
 };
 
 // Expected email subject prefix per channel, copied from the swimlane.
