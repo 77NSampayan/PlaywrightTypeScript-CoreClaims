@@ -30,10 +30,10 @@ async function checkSignal(signals: DeSignalReader, dbConnection: DbConnection, 
         case 'S6_PAYMENT_PROCESSED':
             // COMCHECK: DE loads the Disbursement File into de_nav_pay_ref.
             return channel === 'COMCHECK'
-                ? { result: await signals.navPayRef(controlCode), fields: { paymentSignalSource: 'de_nav_pay_ref' } }
+                ? { result: await signals.navPayRef(controlCode, code.row.paymentFileName as string | undefined), fields: { paymentSignalSource: 'de_nav_pay_ref' } }
                 : { result: await signals.paymentJournalProcessed(controlCode), fields: { paymentSignalSource: 'de_payment_journal' } };
         case 'S7_PAYMENT_REFERENCE': {
-            const result = channel === 'COMCHECK' ? await signals.navPayRef(controlCode) : await signals.epNumber(channel, controlCode);
+            const result = channel === 'COMCHECK' ? await signals.navPayRef(controlCode, code.row.paymentFileName as string | undefined) : await signals.epNumber(channel, controlCode);
             return result.state === 'FOUND' ? { result, fields: { paymentReference: result.value ?? 'present' } } : { result };
         }
         case 'S9_TRANSMITTAL_F2307': {
@@ -142,7 +142,9 @@ test.describe('Control Code Tracker — DE signal checks', () => {
                         const update: StageUpdate = { detail: result.detail, ...(fields ? { fields } : {}) };
 
                         if (result.state === 'FOUND') {
-                            await tracker.passStage(code.controlCode, stage, ACTOR, update);
+                            // Drop an earlier run's "lookup unresolved" note for this stage — it's resolved now.
+                            const staleNote = String(code.row.remarks ?? '').startsWith(`${stage}: signal lookup unresolved`);
+                            await tracker.passStage(code.controlCode, stage, ACTOR, staleNote ? { ...update, remark: '' } : update);
                             if (stage === 'S6_PAYMENT_PROCESSED' && code.channel === 'COMCHECK') {
                                 // Same de_nav_pay_ref row is S7's signal too —
                                 // no point waiting another window to read it again.

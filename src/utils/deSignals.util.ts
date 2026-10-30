@@ -217,29 +217,33 @@ export class DeSignalReader {
 
     /**
      * S6/S7 (COMCHECK) — Disbursement File processed: DE loaded a
-     * de_nav_pay_ref row whose [ctlno] is the code. Columns confirmed against
-     * the table; [ctlno] doesn't match any discovery pattern, so no discovery
-     * here. Value = the row's check_no; the newest load wins.
+     * de_nav_pay_ref row whose [FileName] is the file S5 uploaded (the
+     * column the team checks by hand). Falls back to [ctlno] only for a row
+     * with no recorded file name. Columns confirmed against the table, so no
+     * discovery here. A row for this very code is preferred when the file
+     * holds several. Value = the row's check_no; the newest load wins.
      */
-    async navPayRef(controlCode: string): Promise<SignalResult> {
+    async navPayRef(controlCode: string, disbursementFileName: string | undefined): Promise<SignalResult> {
         assertSafeControlCode(controlCode);
+        if (disbursementFileName) assertSafeFileName(disbursementFileName);
 
-        const rows = await this.dbConnection.query<{ check_no: string | null; file_name: string | null; load_date: string | null }>(
-            `SELECT TOP 1 [check_no] AS check_no, [FileName] AS file_name,
+        const where = disbursementFileName ? `[FileName] = '${disbursementFileName}'` : `[ctlno] = '${controlCode}'`;
+        const rows = await this.dbConnection.query<{ ctlno: string | null; check_no: string | null; file_name: string | null; load_date: string | null }>(
+            `SELECT TOP 1 [ctlno] AS ctlno, [check_no] AS check_no, [FileName] AS file_name,
                     CONVERT(varchar(10), [LOAD_DT], 120) AS load_date
              FROM [dbo].[de_nav_pay_ref]
-             WHERE [ctlno] = '${controlCode}'
-             ORDER BY [LOAD_DT] DESC`,
-            `de_nav_pay_ref row for ctlno "${controlCode}"`
+             WHERE ${where}
+             ORDER BY CASE WHEN [ctlno] = '${controlCode}' THEN 0 ELSE 1 END, [LOAD_DT] DESC`,
+            `de_nav_pay_ref row where ${where}`
         );
         const row = rows[0];
-        if (!row) return { state: 'NOT_FOUND', detail: `no de_nav_pay_ref row where [ctlno] = ${controlCode}` };
+        if (!row) return { state: 'NOT_FOUND', detail: `no de_nav_pay_ref row where ${where}` };
 
         const checkNo = String(row.check_no ?? '').trim() || undefined;
         return {
             state: 'FOUND',
             value: checkNo,
-            detail: `de_nav_pay_ref: ${row.file_name ?? '(no filename)'}, check_no ${checkNo ?? '(blank)'}, loaded ${row.load_date ?? '(no date)'}`,
+            detail: `de_nav_pay_ref: ${row.file_name ?? '(no filename)'}, ctlno ${row.ctlno ?? '(blank)'}, check_no ${checkNo ?? '(blank)'}, loaded ${row.load_date ?? '(no date)'}`,
         };
     }
 
