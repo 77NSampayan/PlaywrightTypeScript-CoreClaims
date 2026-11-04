@@ -35,8 +35,10 @@ async function checkSignal(signals: DeSignalReader, dbConnection: DbConnection, 
         case 'S7_PAYMENT_REFERENCE': {
             // COMCHECK skips S7 (CHANNEL_SKIPPED_STAGES), so it's never eligible here.
             if (channel === 'COMCHECK') return { result: { state: 'UNRESOLVED', detail: 'S7 is not part of the COMCHECK flow' } };
-            const result = await signals.epNumber(channel, controlCode);
-            return result.state === 'FOUND' ? { result, fields: { paymentReference: result.value ?? 'present' } } : { result };
+            // The DPS/UB EP Number source isn't confirmed yet (signals.epNumber's
+            // tables are a guess), and a guessed lookup must never time a code
+            // out — so the code stays WAITING until the real query is wired in.
+            return { result: { state: 'UNRESOLVED', detail: `${channel} EP Number lookup not confirmed yet — confirm by hand` } };
         }
         case 'S9_TRANSMITTAL_F2307': {
             const transmittal = await signals.transmittal(controlCode, code.row.settlementFileName as string | undefined);
@@ -154,8 +156,13 @@ test.describe('Control Code Tracker — DE signal checks', () => {
                             await tracker.note(code.controlCode, `${stage}: signal lookup unresolved (${result.detail}) — confirm by hand`, ACTOR);
                             logger.warn(`${code.controlCode} ${stage}: signal lookup unresolved — ${result.detail}`);
                         } else if (code.overdue) {
-                            timedOut.push(`${code.controlCode} ${stage}`);
-                            await tracker.timeoutStage(code.controlCode, stage, ACTOR, `${stage}: no DE signal by the deadline`, {
+                            // Only after the query came back empty: the remark names what was
+                            // missing, not just that the deadline passed.
+                            const deadline = code.window ? formatTimestamp(code.window.deadline) : 'unknown';
+                            const reason = `${stage} TIMED_OUT: ${result.detail} (checked ${formatTimestamp(new Date())}, deadline ${deadline})`;
+                            timedOut.push(`${code.controlCode} ${reason}`);
+                            logger.error(`${code.controlCode} ${reason}`);
+                            await tracker.timeoutStage(code.controlCode, stage, ACTOR, reason, {
                                 ...update,
                                 detail: timeoutEvidence(code, result),
                             });
