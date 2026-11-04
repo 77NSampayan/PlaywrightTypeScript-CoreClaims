@@ -38,7 +38,7 @@ Playwright + TypeScript UI automation for the Amplify Health Product Portal (Cor
    | `VALID_PASSWORD_1` | always | Password for that account |
    | `VALID_OTP_SECRET_1` | only for the SSO login spec's MFA step | TOTP seed for the account's authenticator |
    | `VALID_USERNAME_n` / `VALID_PASSWORD_n` / `VALID_OTP_SECRET_n` (n = 2, 3, …) | no | Extra test accounts, read until the first missing `VALID_USERNAME_n`. Each account is bound to one parallel worker, so the run uses as many workers as accounts. |
-   | `DATA_ENRICHMENT_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
+   | `DB_SERVER` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_PORT` | only for `dbConnection`-backed specs | Pre-production `data_enrichment` database. Use a read-only (`db_datareader`) account. |
    | `MEMBERSHIP_DB_SERVER` / `_NAME` / `_USER` / `_PASSWORD` / `_PORT` | only for `membershipDbConnection`-backed specs | Separate server/credentials from the DB above. Same read-only-account guidance applies. |
    | `LOG_LEVEL` | no | `DEBUG` \| `INFO` \| `STEP` \| `WARN` \| `ERROR` — defaults to `INFO` |
 
@@ -149,11 +149,11 @@ use, and `test-data/` is gitignored.
 | S0 Intake file creation | `node scripts/generate-intake-batches.ts` (or IntakeUpload's own fallback) | — the generator registers each code as `IN_PROGRESS`, then `PASSED` once its file is written |
 | S1 Intake upload | `tests/IntakeUpload.spec.ts` (`api`) | S0 passed, not yet uploaded |
 | S2 Memo upload | `tests/ClaimMemoUpload.spec.ts` (`api`) | S1 passed and a row has Action Memo = Y (otherwise N/A) |
-| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | 15–60 min after S1/S2 |
-| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S3 passed |
+| S3 Intake processed | `tests/PipelineSignalCheck.spec.ts` (`db`) | Checked 2 min after DE's next run following S1/S2 (DE runs at :00/:15/:30/:45), then after each run; `TIMED_OUT` after the 4th. Signal: `de_op_file_tracker` lists `<code>.xlsx` as `DONE` |
+| S4 Visible in Core Claims | `tests/ClaimsQueryCheck.spec.ts` (`msedge`) | S1 passed and S2 passed or N/A, S4 not passed yet — independent of S3 (S4 checks the UI, S3 the DB), so an S3 timeout doesn't block it. Not shown yet = `FAILED`, retried next run |
 | S5 Payment Journal / Disbursement | `tests/PaymentJournalUpload.spec.ts` (`api`) | S4 passed |
-| S6 Payment processed · S7 EP No / NAV pay ref | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
-| S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed |
+| S6 Payment processed (DPS/UB: `de_payment_journal`; COMCHECK: `de_nav_pay_ref` by `FileName`) · S7 EP No (DPS/UB only, N/A for COMCHECK) | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after the previous stage |
+| S8 Return File (DPS/UB) / F2307 (COMCHECK) | `tests/ReturnFileUpload.spec.ts` / `tests/F2307Upload.spec.ts` (`api`) | S7 passed (DPS/UB) / S6 passed (COMCHECK) |
 | S9 Transmittal + F2307 | `tests/PipelineSignalCheck.spec.ts` (`db`) | 30–60 min after S8 |
 | S10 Email | **by hand for now**: set `S10 Status` to `PASSED` | S9 passed |
 
@@ -162,7 +162,7 @@ Creating intake files prints what happened to the tracker as it goes:
 ```text
 ── Intake file creation · RUN-20261026-1630 ──────────────────────────
 [EXECUTING] 6 control code(s) registered in the tracker as S0 IN_PROGRESS
-  ✓ OPEML2026102600001T  DPS       NEGATIVE  2 row(s), 1 Action Memo  → test-data/DPS/10.26.26/OPEML2026102600001T.xlsx
+  ✓ OPEML2026102648213T  DPS       NEGATIVE  2 row(s), 1 Action Memo  → test-data/DPS/10.26.26/OPEML2026102648213T.xlsx
   ...
 [DONE] 6 intake file(s) created, 0 failed — tracker S0 updated
 ```
@@ -173,17 +173,31 @@ node scripts/init-control-code-tracker.ts          # one line per code: stage, s
 npx playwright test --project=db tests/PipelineSignalCheck.spec.ts   # advance every due DE wait
 ```
 
+**Skipping a stage.** `SKIPPED_STAGES` in
+[src/constants/tracker.config.ts](src/constants/tracker.config.ts) lists stages that are
+skipped for now, with a reason. A code reaching one gets `N/A` there, with the reason in
+Remarks and the Event Log, so the next stage can run. It is empty today. S3 was listed
+until the DE database access arrived; codes that reached S3 during that time keep their
+`N/A` (S3 was never verified for them), and every newer code waits at S3. While S3 is
+listed, S4 also checks only that each code shows up in Claims Query.
+
 How it behaves:
 
 - **Re-running is always safe.** Every spec only touches codes that are
   eligible right now. A passed upload is never uploaded again, and a spec with
   nothing to do is reported as skipped.
-- **Waits are single-pass checks, not sleeps.** Before "Next Check At" a code
-  is left alone. A check that finds nothing before "Wait Deadline" leaves it
-  `WAITING`. A miss after the deadline marks it `TIMED_OUT`: that code stops,
-  other codes carry on, the Event Log keeps the evidence, and the check spec
-  fails. A timeout is never retried, re-uploaded or extended automatically.
-  Change the windows on the **Config** sheet.
+- **One wait check runs until DE has answered.** Start
+  `PipelineSignalCheck.spec.ts` right after the upload: it waits until each
+  code's "Next Check At", checks it, and re-checks after every DE run (S3: 2 min
+  after :00/:15/:30/:45; other stages every 5 min) until the code passes or
+  reaches "Wait Deadline", then ends — about an hour at most. A check that
+  finds nothing leaves the code `WAITING`; a miss at the deadline marks it
+  `TIMED_OUT`: that code stops, other codes carry on, the Event Log keeps the
+  evidence, and the check spec fails. A timeout is never retried, re-uploaded
+  or extended automatically. `SIGNAL_CHECK_ONCE=1` makes one pass instead
+  (codes not due yet are left alone). Change the windows on the **Config**
+  sheet; for S3, **DE Job Every (min)** is DE's run interval and Cap ÷ it is
+  the number of runs a code gets.
 - **`FAILED` is retryable, `TIMED_OUT` is not.** A failed upload never reached
   the blob, so re-running the spec retries it. A timed-out wait may still be
   processing in DE, so a person decides what happens next.
@@ -214,7 +228,7 @@ in before the stages run and back out afterwards, even when a stage failed:
 | Kept | Where on the runner (`%USERPROFILE%\claims-qa-state\`) |
 |---|---|
 | Tracker + intake files (`test-data/`) | `op-pipeline\test-data\` |
-| Filename counter (`scripts/.intake-sequence-state.json`) | `op-pipeline\.intake-sequence-state.json` |
+| Control numbers used today (`scripts/.intake-sequence-state.json`) | `op-pipeline\.intake-sequence-state.json` |
 | What the last run saved, and which run | `op-pipeline\store.json` |
 | Tracker + counter before each run, newest 20 | `op-pipeline-snapshots\<timestamp>-run<N>\` |
 
@@ -223,8 +237,8 @@ run's summary (tracker status before and after) or download its `control-code-tr
 artifact, kept 30 days.
 
 **First run on a runner.** A run stops with "No pipeline state found" until the state
-exists, because starting empty would restart the filename counter and reuse control
-codes already uploaded. Run the workflow once with **initialize_state** ticked and
+exists, because starting empty would lose the tracker's history and the record of
+control numbers already used. Run the workflow once with **initialize_state** ticked and
 S0–S2 unticked. To carry existing codes over, first copy a local `test-data\` and
 `scripts\.intake-sequence-state.json` into `op-pipeline\` on the runner.
 

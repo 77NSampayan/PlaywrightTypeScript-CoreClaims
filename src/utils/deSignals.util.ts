@@ -140,14 +140,61 @@ export class DeSignalReader {
 
     // ─── Stage signals ──────────────────────────────
 
-    /** S3 — intake processed: the code has a de_claims_status_details row. Value = its status column, if any. */
+    /**
+     * S3 — intake processed: DE's file tracker lists the intake file as DONE.
+     * Columns confirmed against dbo.de_op_file_tracker (file_name =
+     * "<control code>.xlsx", status DONE once the 15-minute job has run), so
+     * no column discovery here. Any other status keeps the code waiting, with
+     * the status in the evidence. The newest row wins if the file was
+     * uploaded more than once. The time is converted to text in SQL: mssql
+     * would read a datetime as UTC and shift it 8 hours.
+     */
     async intakeProcessed(controlCode: string): Promise<SignalResult> {
-        return this.byControlCode('de_claims_status_details', controlCode, [/^status$/i, /status/i]);
+        assertSafeControlCode(controlCode);
+        const fileName = `${controlCode}.xlsx`;
+
+        const rows = await this.dbConnection.query<{ status: string | null; updated_at: string | null }>(
+            `SELECT TOP 1 [status], CONVERT(varchar(19), [updated_date], 120) AS updated_at
+             FROM [dbo].[de_op_file_tracker]
+             WHERE [file_name] = '${fileName}'
+             ORDER BY [id] DESC`,
+            `de_op_file_tracker row for "${fileName}"`
+        );
+        const row = rows[0];
+        if (!row) return { state: 'NOT_FOUND', detail: `no de_op_file_tracker row for ${fileName}` };
+
+        const status = String(row.status ?? '').trim();
+        const detail = `de_op_file_tracker: ${fileName} status ${status || '(blank)'}${row.updated_at ? ` at ${row.updated_at}` : ''}`;
+        return status.toUpperCase() === 'DONE' ? { state: 'FOUND', value: status, detail } : { state: 'NOT_FOUND', detail };
     }
 
-    /** S6 (DPS/UB) — Payment Journal processed: the code has a de_payment_journal row. */
+    /**
+     * S6 (DPS/UB) — Payment Journal processed: DE loaded a de_payment_journal
+     * row whose [Reference Control No.] is the code. Columns confirmed against
+     * the table: [Control Code] there is NULL, and the names carry spaces and
+     * dots, which column discovery would never match — so no discovery here.
+     * Value = the row's Document No.; the newest load wins.
+     */
     async paymentJournalProcessed(controlCode: string): Promise<SignalResult> {
-        return this.byControlCode('de_payment_journal', controlCode);
+        assertSafeControlCode(controlCode);
+
+        const rows = await this.dbConnection.query<{ document_no: string | null; file_name: string | null; load_date: string | null; status: string | null }>(
+            `SELECT TOP 1 [Document No.] AS document_no, [Filename] AS file_name,
+                    CONVERT(varchar(10), [Load_Date], 120) AS load_date, [Status] AS status
+             FROM [dbo].[de_payment_journal]
+             WHERE [Reference Control No.] = '${controlCode}'
+             ORDER BY [Load_Date] DESC`,
+            `de_payment_journal row for Reference Control No. "${controlCode}"`
+        );
+        const row = rows[0];
+        if (!row) return { state: 'NOT_FOUND', detail: `no de_payment_journal row where [Reference Control No.] = ${controlCode}` };
+
+        const documentNo = String(row.document_no ?? '').trim() || undefined;
+        return {
+            state: 'FOUND',
+            value: documentNo,
+            detail: `de_payment_journal: ${row.file_name ?? '(no filename)'}, Document No. ${documentNo ?? '(blank)'}, status ${row.status ?? '(blank)'}, loaded ${row.load_date ?? '(no date)'}`,
+        };
     }
 
     /**
@@ -168,9 +215,33 @@ export class DeSignalReader {
         return { state: 'FOUND', value: String(row['transaction_no']).trim(), detail: `${table}.transaction_no` };
     }
 
-    /** S6/S7 (COMCHECK) — the NAV payment reference row. Value = its reference column, if one is identifiable. */
-    async navPayRef(controlCode: string): Promise<SignalResult> {
-        return this.byControlCode('de_nav_pay_ref', controlCode, [/pay_?ref/i, /reference/i, /ref/i]);
+    /**
+     * S6 (COMCHECK) — Disbursement File processed: DE loaded a de_nav_pay_ref
+     * row whose [FileName] is the file S5 uploaded, the column the team
+     * checks by hand. FileName only — no other column is matched. Without a
+     * recorded file name there is nothing to look up, so that's UNRESOLVED,
+     * never a miss. Value = the row's check_no; the newest load wins.
+     */
+    async disbursementProcessed(disbursementFileName: string | undefined): Promise<SignalResult> {
+        if (!disbursementFileName) return { state: 'UNRESOLVED', detail: 'no Payment File Name recorded at S5 to look up in de_nav_pay_ref' };
+        assertSafeFileName(disbursementFileName);
+
+        const rows = await this.dbConnection.query<{ check_no: string | null; load_date: string | null }>(
+            `SELECT TOP 1 [check_no] AS check_no, CONVERT(varchar(10), [LOAD_DT], 120) AS load_date
+             FROM [dbo].[de_nav_pay_ref]
+             WHERE [FileName] = '${disbursementFileName}'
+             ORDER BY [LOAD_DT] DESC`,
+            `de_nav_pay_ref row for FileName "${disbursementFileName}"`
+        );
+        const row = rows[0];
+        if (!row) return { state: 'NOT_FOUND', detail: `no de_nav_pay_ref row where [FileName] = ${disbursementFileName}` };
+
+        const checkNo = String(row.check_no ?? '').trim() || undefined;
+        return {
+            state: 'FOUND',
+            value: checkNo,
+            detail: `de_nav_pay_ref: ${disbursementFileName}, check_no ${checkNo ?? '(blank)'}, loaded ${row.load_date ?? '(no date)'}`,
+        };
     }
 
     /**

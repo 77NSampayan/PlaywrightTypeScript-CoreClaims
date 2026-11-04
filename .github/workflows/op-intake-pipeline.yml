@@ -1,7 +1,10 @@
-name: OP Intake Pipeline (S0-S2)
+name: OP Intake Pipeline (S0-S4)
 
 # Tracker status, S0 Create intake files, S1 Upload intake files, S2 Upload
-# claim memos — see README § OP Teleconsultation pipeline.
+# claim memos, S3 Check intake processed, S4 Check claims in Core Claims —
+# see README § OP Teleconsultation pipeline. S3 can run straight after S2:
+# it waits for DE's quarter-hour runs itself (up to ~1 hour). A code S3
+# confirms in a run is checked by S4 in that same run.
 #
 # Manual trigger only: S1 and S2 upload to the real Azure Blob storage the
 # claims pipeline watches, so nothing here runs on a push or a schedule.
@@ -20,6 +23,14 @@ on:
         description: 'S2 Upload claim memos'
         type: boolean
         default: true
+      check_intake_processed:
+        description: 'S3 Check intake processed in the DE database (waits for DE, up to ~1 hour)'
+        type: boolean
+        default: false
+      check_core_claims:
+        description: 'S4 Check claims in Core Claims (uploaded codes not confirmed yet)'
+        type: boolean
+        default: false
       payment_mode:
         description: 'Payment mode to generate files for (PAYMENT_MODE_FILTER)'
         type: choice
@@ -34,8 +45,8 @@ on:
         type: boolean
         default: false
 
-# Every pipeline run reads and writes the same tracker and filename counter on
-# the runner (README § Pipeline state on the runner) — two at once would
+# Every pipeline run reads and writes the same tracker and used control numbers
+# on the runner (README § Pipeline state on the runner) — two at once would
 # overwrite each other. Future S3+ workflows join this same group.
 concurrency:
   group: op-pipeline-state
@@ -43,11 +54,12 @@ concurrency:
 
 jobs:
   pipeline:
-    name: Tracker status, S0-S2
+    name: Tracker status, S0-S4
     # AVD-BASCL06-0 only: it holds the pipeline state. Any other runner would
     # start empty and reuse control codes, so the op-pipeline label pins it.
     runs-on: [self-hosted, windows, op-pipeline]
-    timeout-minutes: 45
+    # S3 alone can wait ~1 hour for DE's runs, on top of S0-S2 and S4.
+    timeout-minutes: 120
     defaults:
       run:
         shell: powershell
@@ -69,7 +81,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The pipeline's state (tracker, intake files, filename counter) is
+      # The pipeline's state (tracker, intake files, used control numbers) is
       # git-ignored, so checkout's clean deletes it from the workspace on every
       # run; this keeps it on the runner between runs. Refuses to run when the
       # state is missing or damaged — README § Pipeline state on the runner.
@@ -120,6 +132,50 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s2-memo-upload
 
+      # Read-only DE lookups (db project, no browser) for every code whose wait
+      # is waiting — S3 now, and S6/S7/S9 once codes get there. Waits for each
+      # code's first check, re-checks after every DE run (S3: 2 min after
+      # :00/:15/:30/:45), and ends when every code passed or reached its
+      # deadline; a miss at the deadline is TIMED_OUT and fails this step. The
+      # DB connection opens before any code is checked, so an unreachable database fails the step
+      # without writing anything to the tracker.
+      - name: S3 Check intake processed
+        if: ${{ inputs.check_intake_processed }}
+        run: npx playwright test tests/PipelineSignalCheck.spec.ts
+        env:
+          # The config needs these three at load time, even for the db project.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s3-intake-processed
+
+      # Searches every uploaded code (S1 passed, S2 passed or N/A) whose S4
+      # isn't confirmed yet in Core Claims → Claims Query (msedge project, signs
+      # in through `setup` first), and compares the row count with DE's billed
+      # claim lines. Doesn't need S3, but this step is skipped if S3 failed in
+      # this run; run S4 on its own then.
+      - name: S4 Check claims in Core Claims
+        if: ${{ inputs.check_core_claims }}
+        run: npx playwright test tests/ClaimsQueryCheck.spec.ts
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VALID_USERNAME_1: ${{ secrets.JOHN_EMAIL }}
+          VALID_PASSWORD_1: ${{ secrets.JOHN_PASSWORD }}
+          VALID_OTP_SECRET_1: ${{ secrets.JOHN_OTP_SECRET }}
+          DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/s4-claims-query
+
       - name: Tracker status (after)
         if: ${{ always() && steps.restore.outcome == 'success' }}
         run: |
@@ -152,7 +208,7 @@ jobs:
       # Same PII reasoning as playwright.yml: a failure screenshot can show an
       # authenticated page, so keep the retention window short.
       - name: Upload Playwright HTML report
-        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos) }}
+        if: ${{ !cancelled() && (inputs.upload_intake || inputs.upload_memos || inputs.check_intake_processed || inputs.check_core_claims) }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-op-intake

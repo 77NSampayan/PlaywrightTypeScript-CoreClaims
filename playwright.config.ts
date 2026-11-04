@@ -92,7 +92,7 @@ function dbConfigFromEnv(prefix: string) {
 }
 
 // Pre-production — data_enrichment
-export const db_config = dbConfigFromEnv('DATA_ENRICHMENT_DB');
+export const db_config = dbConfigFromEnv('DB');
 
 // Membership database — separate server/credentials from db_config above.
 export const membership_db_config = dbConfigFromEnv('MEMBERSHIP_DB');

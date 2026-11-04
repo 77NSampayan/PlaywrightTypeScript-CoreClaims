@@ -28,13 +28,17 @@ import { randomUUID } from 'crypto';
 import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import path from 'path';
 import {
+    CHANNEL_SKIPPED_STAGES,
     EMAIL_SUBJECT_PREFIX,
     REPO_ROOT,
+    SKIPPED_STAGES,
     STAGES,
     STAGE_COLUMNS,
     isWaitStage,
+    prerequisitesOf,
     trackerPath,
     type PaymentChannel,
+    type SkippedStages,
     type Stage,
     type StageStatus,
     type TrackerColumnKey,
@@ -45,6 +49,7 @@ import {
     formatTimestamp,
     getChannel,
     getStatus,
+    isDone,
     waitWindow,
     type CellValue,
     type TrackerRow,
@@ -86,7 +91,7 @@ export type EligibleCode = {
 
 export type StageQuery = {
     eligible: EligibleCode[];
-    notDue: { controlCode: string; nextCheckAt: Date }[];
+    notDue: { controlCode: string; nextCheckAt: Date; deadline: Date }[];
 };
 
 export type StageUpdate = {
@@ -131,10 +136,12 @@ export class ControlCodeTracker {
     // parameter properties aren't strippable syntax.
     readonly filePath: string;
     private readonly clock: () => Date;
+    private readonly skippedStages: SkippedStages;
 
-    constructor(filePath: string = trackerPath(), clock: () => Date = () => new Date()) {
+    constructor(filePath: string = trackerPath(), clock: () => Date = () => new Date(), skippedStages: SkippedStages = SKIPPED_STAGES) {
         this.filePath = filePath;
         this.clock = clock;
+        this.skippedStages = skippedStages;
     }
 
     // ─── Reading ──────────────────────────────
@@ -165,7 +172,7 @@ export class ControlCodeTracker {
 
             const evaluation = evaluateStage(row, stage, config, now);
             if (evaluation.state === 'NOT_DUE') {
-                result.notDue.push({ controlCode: String(row.controlCode), nextCheckAt: evaluation.window.nextCheckAt });
+                result.notDue.push({ controlCode: String(row.controlCode), nextCheckAt: evaluation.window.nextCheckAt, deadline: evaluation.window.deadline });
             } else if (evaluation.state === 'ELIGIBLE') {
                 result.eligible.push({
                     controlCode: String(row.controlCode),
@@ -295,6 +302,27 @@ export class ControlCodeTracker {
         await this.passStage(controlCode, stage, actor, update ?? {});
     }
 
+    /**
+     * Skips (N/A) any SKIPPED_STAGES stage a code has already reached — e.g.
+     * S3 opened as WAITING before it was listed. Codes that reach a skipped
+     * stage later are skipped as they pass the stage before it. Returns the
+     * codes changed; writes nothing when there are none.
+     */
+    async applySkippedStages(actor: string): Promise<string[]> {
+        const { rows } = await this.read();
+        if (!rows.some((row) => this.reachedSkippedStages(row).length > 0)) return [];
+
+        const changed: string[] = [];
+        await this.mutate((data, now) => {
+            for (const row of data.rows) {
+                const stages = this.reachedSkippedStages(row);
+                for (const stage of stages) this.skipStage(data, row, stage, actor, now);
+                if (stages.length > 0) changed.push(String(row.controlCode));
+            }
+        });
+        return changed;
+    }
+
     /** Sets Remarks only — e.g. "signal query not resolvable" — without changing any status. */
     async note(controlCode: string, remark: string, actor: string): Promise<void> {
         await this.mutate((data, now) => {
@@ -336,24 +364,66 @@ export class ControlCodeTracker {
             });
 
             const later = STAGES.slice(STAGES.indexOf(stage) + 1);
+            // Only stages that wait on the timed-out one are blocked: S4
+            // doesn't wait on S3 (NOT_PREREQUISITES), so it still runs.
             if (to === 'TIMED_OUT') {
                 for (const next of later) {
-                    if (getStatus(row, next) !== 'N/A') row[STAGE_COLUMNS[next].status] = 'BLOCKED';
+                    if (getStatus(row, next) !== 'N/A' && prerequisitesOf(next).includes(stage)) row[STAGE_COLUMNS[next].status] = 'BLOCKED';
                 }
             }
 
-            // Passing a stage opens the next wait's window: show it as WAITING
-            // straight away, logged, so the window start is in the evidence.
+            // Passing a stage opens what comes next: a skipped stage
+            // (SKIPPED_STAGES) becomes N/A on the spot, and the next wait
+            // stage shows as WAITING straight away, logged, so the window
+            // start is in the evidence.
             if (to === 'PASSED') {
-                const next = later.find((s) => getStatus(row, s) !== 'N/A');
-                if (next && isWaitStage(next) && getStatus(row, next) === 'NOT_STARTED') {
-                    row[STAGE_COLUMNS[next].status] = 'WAITING';
-                    data.events.push({
-                        timestamp: now, runId: String(row.runId ?? ''), controlCode, stage: next, from: 'NOT_STARTED', to: 'WAITING',
-                        actor, elapsedMinutes: 0, detail: 'wait window opened',
-                    });
+                for (const next of later) {
+                    const nextStatus = getStatus(row, next);
+                    if (nextStatus === 'N/A') continue;
+                    if (nextStatus === 'NOT_STARTED' && this.skipReason(row, next)) {
+                        this.skipStage(data, row, next, actor, now);
+                        continue;
+                    }
+                    if (isWaitStage(next) && nextStatus === 'NOT_STARTED') {
+                        row[STAGE_COLUMNS[next].status] = 'WAITING';
+                        data.events.push({
+                            timestamp: now, runId: String(row.runId ?? ''), controlCode, stage: next, from: 'NOT_STARTED', to: 'WAITING',
+                            actor, elapsedMinutes: 0, detail: 'wait window opened',
+                        });
+                    }
+                    break;
                 }
             }
+        });
+    }
+
+    /** Why this code skips `stage` — skipped for every code, or not part of its channel's flow — if it does. */
+    private skipReason(row: TrackerRow, stage: Stage): string | undefined {
+        const channel = getChannel(row);
+        return this.skippedStages[stage] ?? (channel ? CHANNEL_SKIPPED_STAGES[channel][stage] : undefined);
+    }
+
+    /** Skipped stages this code has reached (every earlier stage done) but not yet marked N/A. */
+    private reachedSkippedStages(row: TrackerRow): Stage[] {
+        return STAGES.filter((stage, index) => {
+            if (!this.skipReason(row, stage)) return false;
+            const status = getStatus(row, stage);
+            if (status !== 'NOT_STARTED' && status !== 'WAITING') return false;
+            return STAGES.slice(0, index).every((earlier) => isDone(getStatus(row, earlier)));
+        });
+    }
+
+    /** N/A with the reason as the remark and in the Event Log — the stage was not verified. */
+    private skipStage(data: TrackerData, row: TrackerRow, stage: Stage, actor: string, now: Date): void {
+        const reason = this.skipReason(row, stage) ?? 'skipped';
+        const from = getStatus(row, stage);
+        row[STAGE_COLUMNS[stage].status] = 'N/A';
+        row.remarks = reason;
+        row.lastUpdatedAt = formatTimestamp(now);
+        row.lastUpdatedBy = actor;
+        data.events.push({
+            timestamp: now, runId: String(row.runId ?? ''), controlCode: String(row.controlCode), stage, from, to: 'N/A',
+            actor, elapsedMinutes: undefined, detail: reason,
         });
     }
 

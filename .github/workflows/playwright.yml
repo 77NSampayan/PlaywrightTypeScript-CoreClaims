@@ -78,11 +78,11 @@ jobs:
           VALID_OTP_SECRET_1: ${{ secrets.NEM_OTP_SECRET }}
           # DB-backed specs (db project). data_enrichment secrets exist; the Membership
           # test also needs MEMBERSHIP_DB_* — create those secrets or it fails at connect.
-          DATA_ENRICHMENT_DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
-          DATA_ENRICHMENT_DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
-          DATA_ENRICHMENT_DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
-          DATA_ENRICHMENT_DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
-          DATA_ENRICHMENT_DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
+          DB_SERVER: ${{ secrets.DATA_ENRICHMENT_DB_SERVER }}
+          DB_NAME: ${{ secrets.DATA_ENRICHMENT_DB_NAME }}
+          DB_USER: ${{ secrets.DATA_ENRICHMENT_DB_USER }}
+          DB_PASSWORD: ${{ secrets.DATA_ENRICHMENT_DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DATA_ENRICHMENT_DB_PORT }}
           MEMBERSHIP_DB_SERVER: ${{ secrets.MEMBERSHIP_DB_SERVER }}
           MEMBERSHIP_DB_NAME: ${{ secrets.MEMBERSHIP_DB_NAME }}
           MEMBERSHIP_DB_USER: ${{ secrets.MEMBERSHIP_DB_USER }}

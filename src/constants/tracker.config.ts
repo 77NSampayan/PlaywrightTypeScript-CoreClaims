@@ -47,6 +47,22 @@ export const STAGES = [
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
+/**
+ * Earlier stages a stage does NOT wait for. S4 is a UI check (does Claims
+ * Query show the code?) and S3 a DB check (did DE process it?) — two
+ * independent confirmations, so S4 only needs the uploads (S1, S2) done, and
+ * an S3 timeout doesn't block it. Stages after S4 still need both.
+ */
+export const NOT_PREREQUISITES: Partial<Record<Stage, readonly Stage[]>> = {
+    S4_CORECLAIMS_VISIBLE: ['S3_INTAKE_PROCESSED'],
+};
+
+/** The earlier stages that must be PASSED or N/A before `stage` may run. */
+export function prerequisitesOf(stage: Stage): Stage[] {
+    const independent = NOT_PREREQUISITES[stage] ?? [];
+    return STAGES.slice(0, STAGES.indexOf(stage)).filter((earlier) => !independent.includes(earlier));
+}
+
 export const STAGE_STATUSES = [
     'NOT_STARTED',
     'IN_PROGRESS',  // a spec has started it (an upload in flight)
@@ -115,8 +131,17 @@ export function writerFor(stage: Stage, channel: PaymentChannel | undefined): st
 export type WaitStage = 'S3_INTAKE_PROCESSED' | 'S6_PAYMENT_PROCESSED' | 'S7_PAYMENT_REFERENCE' | 'S9_TRANSMITTAL_F2307' | 'S10_EMAIL';
 
 export type WaitWindow = {
-    /** Window start + this = "Next Check At": a check before it is a no-op. */
+    /**
+     * Window start + this = "Next Check At": a check before it is a no-op.
+     * For a stage with `jobEveryMinutes`: minutes after each DE run instead.
+     */
     minWaitMinutes: number;
+    /**
+     * DE's job interval for this stage, on the clock (15 = :00/:15/:30/:45).
+     * Set: checks follow DE's runs, and Cap ÷ this = how many runs a code
+     * gets before it times out. Unset: plain window start + Min Wait / Cap.
+     */
+    jobEveryMinutes?: number;
     /** Window start + this = "Wait Deadline": still no signal after it → TIMED_OUT. */
     capMinutes: number;
     signal: string;
@@ -127,9 +152,12 @@ export type WaitWindow = {
 // window for an existing tracker. Caps are still [TBC] in the swimlane; a
 // 15-minute cap would miss most 30-minute DE jobs.
 export const DEFAULT_WAIT_WINDOWS: Record<WaitStage, WaitWindow> = {
-    S3_INTAKE_PROCESSED: { minWaitMinutes: 15, capMinutes: 60, signal: 'de_claims_status_details by control_code (job every 15 min)' },
-    S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal · COMCHECK: de_nav_pay_ref (stand-in, real signal TBC)' },
-    S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: transaction_no in de_dps_input / de_unionbank_input · COMCHECK: de_nav_pay_ref' },
+    // DE's intake job runs at :00/:15/:30/:45 and takes seconds (DONE at
+    // 14:00:07 and 17:00:10 for uploads a few minutes earlier), so the
+    // check follows the clock: 2 min after each run, 4 runs before timing out.
+    S3_INTAKE_PROCESSED: { minWaitMinutes: 2, jobEveryMinutes: 15, capMinutes: 60, signal: 'de_op_file_tracker: file_name = <code>.xlsx, status DONE (job at :00/:15/:30/:45)' },
+    S6_PAYMENT_PROCESSED: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: de_payment_journal by [Reference Control No.] · COMCHECK: de_nav_pay_ref by [FileName] = the uploaded Disbursement File' },
+    S7_PAYMENT_REFERENCE: { minWaitMinutes: 30, capMinutes: 60, signal: 'DPS/UB: EP Number — query not confirmed yet, confirm by hand · COMCHECK: N/A' },
     S9_TRANSMITTAL_F2307: { minWaitMinutes: 30, capMinutes: 60, signal: 'de_transmittal_details + de_f2307_pdf_generation (job every 30 min)' },
     S10_EMAIL: { minWaitMinutes: 30, capMinutes: 60, signal: 'Email in the channel mailbox (job every 30 min)' },
 };
@@ -144,6 +172,33 @@ export function isWaitStage(stage: Stage): stage is WaitStage {
  * mid-upload, so it's left alone rather than uploaded twice.
  */
 export const STALE_IN_PROGRESS_MINUTES = 15;
+
+export type SkippedStages = Partial<Record<Stage, string>>;
+
+/**
+ * Stages skipped for now, each with the reason recorded on the code. A
+ * skipped stage is set to N/A as soon as a code reaches it, so later stages
+ * aren't held up by it. Delete an entry to bring the stage back: new codes go
+ * through it again, and codes already skipped keep their N/A — truthfully,
+ * since the stage was never verified for them.
+ */
+export const SKIPPED_STAGES: SkippedStages = {
+    // Nothing skipped. S3 was listed here until the data_enrichment database
+    // access arrived; while it is, ClaimsQueryCheck.spec.ts (S4) also skips
+    // its DB row counts and only checks that each code shows up.
+};
+
+/**
+ * Stages a payment channel doesn't go through, each with the reason recorded
+ * on the code. Set to N/A as soon as a code of that channel reaches the
+ * stage, the same way as SKIPPED_STAGES. COMCHECK has no payment reference to
+ * wait for: its F2307 upload (S8) follows straight after S6.
+ */
+export const CHANNEL_SKIPPED_STAGES: Record<PaymentChannel, SkippedStages> = {
+    DPS: {},
+    UB: {},
+    COMCHECK: { S7_PAYMENT_REFERENCE: 'Not part of the COMCHECK flow: F2307 is uploaded straight after S6' },
+};
 
 // Expected email subject prefix per channel, copied from the swimlane.
 export const EMAIL_SUBJECT_PREFIX: Record<PaymentChannel, string> = {
@@ -272,7 +327,7 @@ export const CLAIM_ROW_HEADERS = ['Control Code', 'Row #', 'Consultation/Transac
 
 export const EVENT_LOG_HEADERS = ['Timestamp', 'Run ID', 'Control Code', 'Stage', 'From', 'To', 'Actor', 'Elapsed (min)', 'Detail'] as const;
 
-export const CONFIG_HEADERS = ['Stage', 'Min Wait (min)', 'Cap (min)', 'Signal'] as const;
+export const CONFIG_HEADERS = ['Stage', 'Min Wait (min)', 'Cap (min)', 'DE Job Every (min)', 'Signal'] as const;
 
 // Upload destination per stage/channel — documentation only (Legend sheet);
 // the specs that upload keep their own folder constants.
@@ -294,7 +349,7 @@ export const STATUS_MEANINGS: Record<StageStatus, string> = {
     PASSED: 'Done. The next stage can run.',
     FAILED: 'Upload or check error. Re-running the spec retries it.',
     TIMED_OUT: 'No signal by the deadline. Manual investigation — never retried, re-uploaded or extended automatically.',
-    'N/A': 'Does not apply to this code (e.g. memos when no row has Action Memo = Y).',
+    'N/A': 'Does not apply to this code (e.g. memos when no row has Action Memo = Y), or the stage is skipped for now — see Remarks.',
     BLOCKED: 'An earlier stage timed out.',
     NOT_COVERED: "The channel's shared Return File carries a different control code — this code ends here.",
 };

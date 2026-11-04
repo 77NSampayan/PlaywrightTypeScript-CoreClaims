@@ -7,6 +7,7 @@ export class ClaimsQueryPage extends BasePage {
     protected readonly searchByDropdown: Locator;
     protected readonly keywordsInput: Locator;
     protected readonly resultsTable: Locator;
+    protected readonly emptyResult: Locator;
 
     constructor(page: Page) {
         super(page);    // Passes page up to BasePage
@@ -21,6 +22,9 @@ export class ClaimsQueryPage extends BasePage {
         this.searchByDropdown = this.page.locator('p-dropdown [role="combobox"]').first();
         this.keywordsInput    = this.page.getByPlaceholder('Keywords');
         this.resultsTable     = this.page.locator('p-table table');
+        // The "No results found" row the table renders when a search matches
+        // nothing — the app's own empty-state component, not its hashed classes.
+        this.emptyResult      = this.resultsTable.locator('lib-empty-result');
     };
 
     // ─── Actions ──────────────────────────────
@@ -82,10 +86,12 @@ export class ClaimsQueryPage extends BasePage {
     };
 
     // For a Control Code DE has processed but never assigned a
-    // medicard_bill_code — correctly should NOT surface here. toBeHidden()
-    // on a locator matching zero elements resolves as hidden, so this holds
-    // whether the row was never in the DOM at all or was removed from it.
+    // medicard_bill_code — correctly should NOT surface here. Waits for the
+    // table's "No results found" state first: toBeHidden() alone passes on a
+    // locator matching zero elements, i.e. before the search results have
+    // even rendered, so it could miss a row that shows up a moment later.
     async expectControlCodeNotFound(controlCode: string): Promise<void> {
+        await this.elementAssert.toBeVisible(this.emptyResult, `"No results found" for Control Code "${controlCode}"`);
         await this.elementAssert.toBeHidden(
             this.getResultRowByControlCode(controlCode).first(),
             `claim row for Control Code "${controlCode}"`

@@ -9,12 +9,13 @@
 //     and column structure, but every row is complete (Action Memo = "N",
 //     Diagnosis/Dx Code filled in) and uses different patients.
 //
-// Filenames are OPEML<today's date, YYYYMMDD><5-digit running counter>T —
-// the counter continues across runs on the same day (persisted in
-// .intake-sequence-state.json, next to this script) and resets to 1 the
-// first time the script runs on a new day. Deleting generated files under
-// test-data/ does not affect this — the counter lives in the state
-// file, not the output directories.
+// Filenames are OPEML<today's date, YYYYMMDD><5 random digits>T. The digits
+// are random (00001-99999) rather than a running counter, so local runs and
+// GitHub Actions on the same day don't hand out the same codes. A number is
+// never reused on this machine: the ones already used today are read from
+// .intake-sequence-state.json (next to this script) and from the Control
+// Code Tracker before picking. Two different machines can still, rarely,
+// pick the same number (~0.1% for two machines making 12 codes each a day).
 //
 // Schema, column widths, and the fixed test-environment values (Source
 // System, Approval No, OTP, PF Amount, Claim Type, Procedure, Care Setting,
@@ -238,14 +239,17 @@ function nextTransactionId(): string {
     return `${TRANSACTION_ID_PREFIX}${suffix}`;
 }
 
-// Persisted across runs so the filename counter keeps advancing instead of
-// restarting from the reference files every time. Lives next to the script,
-// not under test-data/, so deleting generated output doesn't reset it.
+// Persisted so a random number is never handed out twice on this machine in
+// one day. The tracker is checked too, but this survives a tracker that was
+// deleted or reset. Lives next to the script, not under test-data/, so
+// deleting generated output doesn't reset it.
 type SequenceState = {
-    /** YYYYMMDD of the last run — the counter resets to 1 the first run on a new date. */
+    /** YYYYMMDD of the last run — the used list starts over on a new date. */
     date: string;
-    /** Last filename counter used on `date`. */
-    lastCounter: number;
+    /** Numbers (the 5 digits after the date) already used on `date`. */
+    used?: number[];
+    /** State files from before numbers were random: the last running counter used on `date`. */
+    lastCounter?: number;
 };
 
 async function loadState(): Promise<SequenceState> {
@@ -253,8 +257,39 @@ async function loadState(): Promise<SequenceState> {
         const raw = await readFile(STATE_FILE, 'utf-8');
         return JSON.parse(raw) as SequenceState;
     } catch {
-        return { date: '', lastCounter: 0 };
+        return { date: '' };
     }
+}
+
+const MAX_CONTROL_NUMBER = 99_999;
+
+// Every number already used today on this machine: the state file (for one
+// written before numbers were random, 1..lastCounter) and every code of
+// today's date already in the tracker.
+function usedToday(state: SequenceState, today: string, trackerCodes: string[]): Set<number> {
+    const used = new Set<number>();
+    if (state.date === today) {
+        for (const n of state.used ?? []) used.add(n);
+        for (let n = 1; n <= (state.lastCounter ?? 0); n++) used.add(n);
+    }
+    for (const code of trackerCodes) {
+        const match = /^OPEML(\d{8})(\d{5})T$/.exec(code);
+        if (match && match[1] === today) used.add(Number(match[2]));
+    }
+    return used;
+}
+
+// Same re-roll-on-collision approach as nextTransactionId() above.
+function nextControlNumber(used: Set<number>): number {
+    if (used.size >= MAX_CONTROL_NUMBER) {
+        throw new Error(`Every control code number for today is already used (${MAX_CONTROL_NUMBER}).`);
+    }
+    let n: number;
+    do {
+        n = Math.floor(Math.random() * MAX_CONTROL_NUMBER) + 1; // 00001-99999
+    } while (used.has(n));
+    used.add(n);
+    return n;
 }
 
 async function saveState(state: SequenceState): Promise<void> {
@@ -274,8 +309,8 @@ function formatMmDdYyyy(date: Date): string {
     return `${month}/${day}/${date.getFullYear()}`;
 }
 
-function buildFilename(date: string, counter: number): string {
-    return `OPEML${date}${String(counter).padStart(5, '0')}T`;
+function buildFilename(date: string, controlNumber: number): string {
+    return `OPEML${date}${String(controlNumber).padStart(5, '0')}T`;
 }
 
 type Patient = { memberCode: number; name: string };
@@ -416,19 +451,13 @@ export async function generateIntakeBatches(): Promise<GeneratedIntakeFile[]> {
     const visitDate = formatMmDdYyyy(yesterday);
     const receivedDate = formatMmDdYyyy(now);
 
-    // New day — the filename counter starts over at 1. Same day — continue
-    // from wherever the last run left off.
-    let counter = state.date === today ? state.lastCounter : 0;
+    const tracker = new ControlCodeTracker();
+    const { rows: trackerRows } = await tracker.read();
+    const used = usedToday(state, today, trackerRows.map((row) => String(row.controlCode ?? '')));
 
     const activeModes = filterPaymentModes(PAYMENT_MODE_ORDER);
-    const negativeBatch: BatchEntry[] = activeModes.map((paymentMode) => {
-        counter += 1;
-        return { filename: buildFilename(today, counter), paymentMode };
-    });
-    const positiveBatch: BatchEntry[] = activeModes.map((paymentMode) => {
-        counter += 1;
-        return { filename: buildFilename(today, counter), paymentMode };
-    });
+    const negativeBatch: BatchEntry[] = activeModes.map((paymentMode) => ({ filename: buildFilename(today, nextControlNumber(used)), paymentMode }));
+    const positiveBatch: BatchEntry[] = activeModes.map((paymentMode) => ({ filename: buildFilename(today, nextControlNumber(used)), paymentMode }));
 
     const negativePatients = pickRandomPatients(2);
     const positivePatients = pickRandomPatients(2, negativePatients);
@@ -438,14 +467,13 @@ export async function generateIntakeBatches(): Promise<GeneratedIntakeFile[]> {
         ...positiveBatch.map((entry) => planFile(entry, positivePatients, false, now)),
     ];
 
-    // Claim the counter before anything else: once a code is in the tracker
+    // Claim the numbers before anything else: once a code is in the tracker
     // it must never be handed out again, even if this run crashes mid-write.
     await saveState({
         date: today,
-        lastCounter: counter,
+        used: [...used].sort((a, b) => a - b),
     });
 
-    const tracker = new ControlCodeTracker();
     const runId = newRunId();
 
     console.log(`\n── Intake file creation · ${runId} ──────────────────────────`);

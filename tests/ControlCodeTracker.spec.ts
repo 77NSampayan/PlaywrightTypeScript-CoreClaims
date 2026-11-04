@@ -2,8 +2,9 @@ import path from 'path';
 import { utimes, writeFile } from 'fs/promises';
 import ExcelJS from 'exceljs';
 import { test } from '@fixtures/base.fixture.ts';
-import { REPO_ROOT } from '@constants/tracker.config.ts';
+import { REPO_ROOT, type SkippedStages } from '@constants/tracker.config.ts';
 import { ControlCodeTracker, summarizeError, type NewControlCode } from '@utils/tracker/ControlCodeTracker.util.ts';
+import { formatClock, nextCheckAfter } from '@utils/tracker/trackerRules.util.ts';
 
 // The Control Code Tracker's gating rules, against a throwaway workbook per
 // test (testInfo.outputPath) and a fake clock — no browser, DB or Azure.
@@ -25,11 +26,15 @@ function intake(controlCode: string, actionMemos: string[], channelDir = DPS_DIR
     };
 }
 
-/** A tracker on its own file, with a clock the test moves by hand. */
-function trackerAt(filePath: string) {
+/**
+ * A tracker on its own file, with a clock the test moves by hand. No stages
+ * skipped unless a test passes some, so the rules are tested whatever
+ * SKIPPED_STAGES currently holds.
+ */
+function trackerAt(filePath: string, skippedStages: SkippedStages = {}) {
     const clock = { now: new Date(2026, 9, 26, 9, 0, 0) };
-    const tracker = new ControlCodeTracker(filePath, () => clock.now);
-    const setTime = (hours: number, minutes: number) => { clock.now = new Date(2026, 9, 26, hours, minutes, 0); };
+    const tracker = new ControlCodeTracker(filePath, () => clock.now, skippedStages);
+    const setTime = (hours: number, minutes: number, seconds = 0) => { clock.now = new Date(2026, 9, 26, hours, minutes, seconds); };
     return { tracker, setTime };
 }
 
@@ -90,18 +95,20 @@ test.describe('Control Code Tracker — gating rules', () => {
         await tracker.register([intake(POSITIVE_CODE, ['N'])], 'test');
         await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // 09:00 — S2 is N/A, so S3's window opens here
 
+        // DE's 09:00 run may have started before the 09:00:00 upload, so the
+        // first run that counts is 09:15 → first check 09:17, deadline 10:02.
         setTime(9, 10);
         const early = await tracker.query('S3_INTAKE_PROCESSED');
-        await assert.toEqual(early.eligible.length, 0, 'S3-eligible codes 10 min in (min wait 15)');
-        await assert.toEqual(early.notDue.map((n) => n.nextCheckAt.getMinutes()), [15], '"Next Check At" minute for the not-due code');
+        await assert.toEqual(early.eligible.length, 0, 'S3-eligible codes 10 min in (before DE\'s 09:15 run + 2 min)');
+        await assert.toEqual(early.notDue.map((n) => n.nextCheckAt.getMinutes()), [17], '"Next Check At" minute for the not-due code');
 
         setTime(9, 20);
         const due = await tracker.query('S3_INTAKE_PROCESSED');
         await assert.toEqual(due.eligible.map((c) => [c.controlCode, c.overdue]), [[POSITIVE_CODE, false]], 'S3-eligible codes 20 min in');
 
-        setTime(10, 1);
+        setTime(10, 2);
         const late = await tracker.query('S3_INTAKE_PROCESSED');
-        await assert.toEqual(late.eligible.map((c) => c.overdue), [true], 'overdue flag past the 60-min cap');
+        await assert.toEqual(late.eligible.map((c) => c.overdue), [true], 'overdue flag at the check after DE\'s 4th run');
 
         const row = await tracker.getRow(POSITIVE_CODE);
         await assert.toEqual([row?.s3Status, row?.waitWindowStart], ['WAITING', '2026-10-26 09:00:00'], 'S3 status and window start in the sheet');
@@ -117,7 +124,10 @@ test.describe('Control Code Tracker — gating rules', () => {
         await tracker.timeoutStage(POSITIVE_CODE, 'S3_INTAKE_PROCESSED', 'test', 'no signal');
 
         const row = await tracker.getRow(POSITIVE_CODE);
-        await assert.toEqual([row?.s3Status, row?.s4Status, row?.s10Status, row?.overallStatus], ['TIMED_OUT', 'BLOCKED', 'BLOCKED', 'MANUAL_INVESTIGATION'], 'timed-out code statuses');
+        // S4 doesn't wait on S3 (a separate UI check), so it isn't blocked —
+        // its status stays blank (not started).
+        await assert.toEqual([row?.s3Status, row?.s4Status, row?.s5Status, row?.s10Status, row?.overallStatus], ['TIMED_OUT', undefined, 'BLOCKED', 'BLOCKED', 'MANUAL_INVESTIGATION'], 'timed-out code statuses');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE, NEGATIVE_CODE], 'S4-eligible codes, whatever their S3 status');
         await assert.toEqual(await eligibleCodes(tracker, 'S3_INTAKE_PROCESSED'), [NEGATIVE_CODE], 'S3-eligible codes after the other one timed out');
 
         const { events } = await tracker.read();
@@ -229,5 +239,129 @@ test.describe('Control Code Tracker — gating rules', () => {
 
         const { rows } = await tracker.read();
         await assert.toEqual(rows.map((r) => r.s1Status), codes.map(() => 'PASSED'), 'S1 status of every concurrently-updated code');
+    });
+
+    test('Skips a listed stage as N/A as soon as a code reaches it, opening the next stage', async ({ assert }, testInfo) => {
+        const reason = 'S3 skipped: test reason';
+        const { tracker } = trackerAt(testInfo.outputPath('tracker.xlsx'), { S3_INTAKE_PROCESSED: reason });
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(NEGATIVE_CODE, ['N', 'Y'])], 'test');
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 is N/A, so S3 is next
+        await tracker.passStage(NEGATIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 still to do
+
+        const positive = await tracker.getRow(POSITIVE_CODE);
+        await assert.toEqual([positive?.s3Status, positive?.currentStage, positive?.remarks], ['N/A', 'S4_CORECLAIMS_VISIBLE', reason], 'S3 status, current stage and remark once S1 passed');
+        await assert.toEqual((await tracker.getRow(NEGATIVE_CODE))?.s3Status, undefined, 'S3 untouched while S2 is still to do');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE], 'S4-eligible codes with S3 skipped');
+
+        await tracker.passStage(NEGATIVE_CODE, 'S2_MEMO_UPLOAD', 'test');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE, NEGATIVE_CODE], 'S4-eligible codes once the memo upload passed too');
+
+        const { events } = await tracker.read();
+        const skip = events.find((e) => e.controlCode === POSITIVE_CODE && e.stage === 'S3_INTAKE_PROCESSED');
+        await assert.toEqual([skip?.from, skip?.to, skip?.detail], ['NOT_STARTED', 'N/A', reason], 'Event Log entry for the skip');
+    });
+
+    test('Skips S7 for COMCHECK only, so its F2307 upload follows S6', async ({ assert }, testInfo) => {
+        const comcheckCode = 'OPEML2026102600007T';
+        const { tracker } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(comcheckCode, ['N'], COMCHECK_DIR, 'COMCHECK')], 'test');
+        for (const stage of ['S1_INTAKE_UPLOAD', 'S3_INTAKE_PROCESSED', 'S4_CORECLAIMS_VISIBLE', 'S5_PAYMENT_UPLOAD', 'S6_PAYMENT_PROCESSED'] as const) {
+            for (const code of [POSITIVE_CODE, comcheckCode]) await tracker.passStage(code, stage, 'test');
+        }
+
+        const comcheck = await tracker.getRow(comcheckCode);
+        await assert.toEqual([comcheck?.s7Status, comcheck?.currentStage], ['N/A', 'S8_SETTLEMENT_UPLOAD'], 'COMCHECK S7 status and current stage once S6 passed');
+        await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s7Status, 'WAITING', 'DPS S7 status once S6 passed');
+        await assert.toEqual(await eligibleCodes(tracker, 'S8_SETTLEMENT_UPLOAD'), [comcheckCode], 'S8-eligible codes');
+    });
+
+    test('Skips a listed stage a code had already reached before it was listed', async ({ assert }, testInfo) => {
+        const filePath = testInfo.outputPath('tracker.xlsx');
+        const before = trackerAt(filePath).tracker;
+        await before.register([intake(POSITIVE_CODE, ['N']), intake(NEGATIVE_CODE, ['N', 'Y'])], 'test');
+        await before.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test');
+        await assert.toEqual((await before.getRow(POSITIVE_CODE))?.s3Status, 'WAITING', 'S3 status before the stage was skipped');
+
+        const { tracker } = trackerAt(filePath, { S3_INTAKE_PROCESSED: 'S3 skipped: test reason' });
+        await assert.toEqual(await tracker.applySkippedStages('test'), [POSITIVE_CODE], 'codes skipped (the other has not reached S3)');
+        await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s3Status, 'N/A', 'S3 status after applying the skip');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE], 'S4-eligible codes after applying the skip');
+        await assert.toEqual(await tracker.applySkippedStages('test'), [], 'codes skipped by a second call');
+    });
+
+    test('Offers S4 once the uploads are done, without waiting for S3, until S4 passes', async ({ assert }, testInfo) => {
+        const { tracker } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(NEGATIVE_CODE, ['N', 'Y'])], 'test');
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 N/A → S3 WAITING
+        await tracker.passStage(NEGATIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // S2 still to upload
+
+        await assert.toEqual((await tracker.getRow(POSITIVE_CODE))?.s3Status, 'WAITING', 'S3 status while S4 is checked');
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [POSITIVE_CODE], 'S4-eligible codes (the other still needs its memos)');
+
+        await tracker.passStage(NEGATIVE_CODE, 'S2_MEMO_UPLOAD', 'test');
+        await tracker.runStage(POSITIVE_CODE, 'S4_CORECLAIMS_VISIBLE', 'test', async () => ({}));
+        await assert.toEqual(await eligibleCodes(tracker, 'S4_CORECLAIMS_VISIBLE'), [NEGATIVE_CODE], 'S4-eligible codes once one is confirmed');
+        await assert.toEqual(await eligibleCodes(tracker, 'S5_PAYMENT_UPLOAD'), [], 'S5 still waits for S3');
+    });
+
+    test('Checks S3 after DE\'s next quarter-hour run, and times out after its 4th', async ({ assert }, testInfo) => {
+        const { tracker, setTime } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N']), intake(NEGATIVE_CODE, ['N'])], 'test');
+        setTime(16, 59, 31);
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // DE runs 17:00, 17:15, 17:30, 17:45
+        setTime(17, 0, 30);
+        await tracker.passStage(NEGATIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // just missed 17:00 — DE runs 17:15 … 18:00
+
+        setTime(17, 1);
+        const early = await tracker.query('S3_INTAKE_PROCESSED');
+        await assert.toEqual(early.eligible.length, 0, 'S3-eligible codes at 17:01');
+        await assert.toEqual(early.notDue.map((n) => [n.controlCode, formatClock(n.nextCheckAt), formatClock(n.deadline)]),
+            [[POSITIVE_CODE, '17:02', '17:47'], [NEGATIVE_CODE, '17:17', '18:02']], 'first check and deadline per upload time');
+
+        setTime(17, 2);
+        await assert.toEqual(await eligibleCodes(tracker, 'S3_INTAKE_PROCESSED'), [POSITIVE_CODE], 'S3-eligible codes at 17:02');
+
+        setTime(17, 46);
+        await assert.toEqual((await tracker.query('S3_INTAKE_PROCESSED')).eligible.find((c) => c.controlCode === POSITIVE_CODE)?.overdue, false, 'overdue flag at 17:46');
+        setTime(17, 47);
+        await assert.toEqual((await tracker.query('S3_INTAKE_PROCESSED')).eligible.find((c) => c.controlCode === POSITIVE_CODE)?.overdue, true, 'overdue flag at 17:47');
+    });
+
+    test('After an S3 miss, points at the check after DE\'s next run', async ({ assert }, testInfo) => {
+        const { tracker, setTime } = trackerAt(testInfo.outputPath('tracker.xlsx'));
+        await tracker.register([intake(POSITIVE_CODE, ['N'])], 'test');
+        setTime(16, 59, 31);
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test');
+
+        setTime(17, 3);
+        await tracker.stillWaiting(POSITIVE_CODE, 'S3_INTAKE_PROCESSED', 'test', { detail: 'no de_op_file_tracker row' });
+        const [code] = await tracker.getEligible('S3_INTAKE_PROCESSED');
+        const row = await tracker.getRow(POSITIVE_CODE);
+        await assert.toEqual(formatClock(nextCheckAfter(code!.window!, new Date(2026, 9, 26, 17, 3))), '17:17', 'next check after a miss at 17:03');
+        await assert.toEqual(row?.nextCheckAt, '2026-10-26 17:17:00', '"Next Check At" in the sheet after the miss');
+        await assert.toContain(String(row?.nextStep), 'after 17:17', 'Next Step after the miss');
+        await assert.toEqual(formatClock(nextCheckAfter(code!.window!, new Date(2026, 9, 26, 17, 46))), '17:47', 'next check never goes past the deadline');
+    });
+
+    test('Keeps the clock-aligned S3 timing for a Config sheet written before DE Job Every existed', async ({ assert }, testInfo) => {
+        const filePath = testInfo.outputPath('tracker.xlsx');
+        const { tracker, setTime } = trackerAt(filePath);
+        await tracker.register([intake(POSITIVE_CODE, ['N'])], 'test');
+        await tracker.passStage(POSITIVE_CODE, 'S1_INTAKE_UPLOAD', 'test'); // 09:00
+
+        // The old layout: no DE Job Every column, S3 Min Wait 15 ("after the upload").
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(filePath);
+        const config = workbook.getWorksheet('Config')!;
+        const jobCol = (config.getRow(1).values as unknown[]).indexOf('DE Job Every (min)');
+        config.spliceColumns(jobCol, 1);
+        config.eachRow((row) => {
+            if (row.getCell(1).value === 'S3_INTAKE_PROCESSED') row.getCell(2).value = 15;
+        });
+        await workbook.xlsx.writeFile(filePath);
+
+        setTime(9, 10);
+        const { notDue } = await tracker.query('S3_INTAKE_PROCESSED');
+        await assert.toEqual(notDue.map((n) => formatClock(n.nextCheckAt)), ['09:17'], 'first check with an old-layout Config sheet');
     });
 });
